@@ -2,6 +2,7 @@
 import subprocess as sbp
 import os
 import itertools
+import numpy as np
 
 # function to get genomeChrBinNBits parameter for STAR alignment.
 def estimate_STAR_ChrBinNbits(genome_file, read_length):
