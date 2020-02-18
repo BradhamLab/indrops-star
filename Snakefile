@@ -2,6 +2,7 @@ import itertools
 import os
 
 configfile: "files/config.yaml"
+shell.prefix("source activate indrops-star; ")
 
 LIBRARIES = config['project']['libraries'].values()
 SPLITS = ['L{}{}'.format('0'*(3 - len(str(n))), n)\
@@ -10,20 +11,18 @@ READS = ['R1', 'R2', 'R3', 'R4']
 
 rule all:
     input:
-        # expand(temp(os.path.join(config['project']['dir'],
-        #                          'procesed', 'fastq', 'weaved',
-        #                          '{{split}}_' + '{library}_bc_umi.fastq')),
-        #        library=LIBRARIES)  
-        expand(os.path.join(config['project']['dir'], 
-                            'processed', 'fastq', 'combined',
-                            '{library}_cdna.fastq'),
-               library=LIBRARIES)
+        # expand(os.path.join(config['project']['dir'], 
+        #                     'processed', 'fastq', 'combined',
+        #                     '{library}_cdna.fastq'),
+        #        library=LIBRARIES)
+       os.path.join(config['project']['dir'],
+                    'summaries', 'reads', 'read_counts.png')
 
 rule extract_fastqs:
     output:
         expand(os.path.join(config['project']['dir'],
-                      'Data', 'Intensities', 'BaseCalls',
-                      'Undetermined_S0_{split}_{r}_001.fastq.gz'),
+                            'Data', 'Intensities', 'BaseCalls',
+                            'Undetermined_S0_{split}_{r}_001.fastq.gz'),
                split=SPLITS, r=READS)
     params:
         project_dir=config['project']['dir']
@@ -43,7 +42,7 @@ rule unzip_fastqs:
         temp(os.path.join(config['project']['dir'],
                           'tmp', '{split}_{r}_001.fastq'))
     shell:
-        "gzcat {input} > {output}"
+        "gunzip -c {input} > {output}"
 
 rule weave_fastqs:
     input:
@@ -62,14 +61,14 @@ rule weave_fastqs:
         libraries=config['project']['libraries'],
         nsubs=config['params']['weave_fastqs']['mismatches']
     output:
-        expand(temp(os.path.join(config['project']['dir'],
+        temp(expand(os.path.join(config['project']['dir'],
                                  'processed', 'fastq', 'weaved',
-                                 '{{split}}_' + '{library}_cdna.fastq')),
-               library=LIBRARIES, allow_missing=True),
-        expand(temp(os.path.join(config['project']['dir'],
+                                 '{{split}}_' + '{library}_cdna.fastq'),
+               library=LIBRARIES, allow_missing=True)),
+        temp(expand(os.path.join(config['project']['dir'],
                                  'processed', 'fastq', 'weaved',
-                                 '{{split}}_' + '{library}_bc_umi.fastq')),
-               library=LIBRARIES, allow_missing=True)      
+                                 '{{split}}_' + '{library}_bc_umi.fastq'),
+               library=LIBRARIES, allow_missing=True))
     script:
         "scripts/weave_fastqs.py"
 
@@ -78,11 +77,11 @@ rule combine_fastqs:
         cdna=expand(os.path.join(config['project']['dir'],
                                  'processed', 'fastq', 'weaved',
                                  '{split}_{{library}}_cdna.fastq'),
-               split=SPLITS, allow_missing=True),
+                    split=SPLITS, allow_missing=True),
         bc_umi=expand(os.path.join(config['project']['dir'],
                                    'processed', 'fastq', 'weaved',
                                    '{split}_{{library}}_bc_umi.fastq'),
-               split=SPLITS, allow_missing=True)
+                      split=SPLITS, allow_missing=True)
     output:
         cdna=os.path.join(config['project']['dir'], 
                           'processed', 'fastq', 'combined',
@@ -93,3 +92,56 @@ rule combine_fastqs:
     shell:
         "cat {input.cdna} > {output.cdna}; "
         "cat {input.bc_umi} > {output.bc_umi};"
+
+## summarize reads per library + ambig
+rule count_reads_per_library:
+    input:
+        cdna=os.path.join(config['project']['dir'], 
+                          'processed', 'fastq', 'combined',
+                          '{library}_cdna.fastq')
+    output:
+        temp(os.path.join(config['project']['dir'],
+                                 'summaries', 'reads',
+                                 '{library}_read_counts.csv'))
+    shell:
+        "echo $(awk {{s++}}END{{print\ s/4}} {input.cdna}),{wildcards.library} > {output}"
+
+rule count_ambig_reads:
+    input:
+        expand(os.path.join(config['project']['dir'],
+                            'summaries', 'reads',
+                            '{library}_read_counts.csv'), library=LIBRARIES)
+    params:
+        weave=os.path.join(config['project']['dir'],
+                                 'processed', 'fastq', 'weaved')
+    output:
+        temp(os.path.join(config['project']['dir'],
+                                 'summaries', 'reads',
+                                 'ambig_read_counts.csv'))
+    shell:
+        "echo $(awk {{s++}}END{{print\ s/4}} {params.weave}/*cdna.fastq),Ambiguous > {output}"
+
+rule summarize_library_read_counts:
+    input:
+        libraries=expand(os.path.join(config['project']['dir'],
+                                      'summaries', 'reads',
+                                      '{library}_read_counts.csv'),
+                         library=LIBRARIES),
+        ambig=os.path.join(config['project']['dir'],
+                                 'summaries', 'reads',
+                                 'ambig_read_counts.csv')
+    output:
+        os.path.join(config['project']['dir'],
+                     'summaries', 'reads', 'read_counts.csv')
+    shell:
+        "cat {input.libraries} {input.ambig} > {output}"
+
+rule plot_library_read_counts:
+    input:
+        csv=os.path.join(config['project']['dir'],
+                         'summaries', 'reads', 'read_counts.csv')
+    output:
+        img=os.path.join(config['project']['dir'],
+                         'summaries', 'reads', 'read_counts.png')
+    script:
+        "scripts/plot_library_read_counts.py"
