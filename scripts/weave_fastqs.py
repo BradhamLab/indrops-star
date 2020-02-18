@@ -191,6 +191,6 @@ if __name__ == "__main__":
                             snakemake.input['r2'],
                             snakemake.input['r3'],
                             snakemake.input['r4'],
-                            snakemake.params['libraries']
+                            snakemake.params['libraries'],
                             prefix=snakemake.params['prefix'],
                             nsubs=snakemake.params['nsubs'])
