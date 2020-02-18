@@ -1,6 +1,7 @@
-from Bio import SeqIO, SeqRecord
 import os
 import itertools
+
+from Bio import SeqIO, SeqRecord
 
 def combine_reads(r2, r4):
     """
@@ -34,11 +35,11 @@ def combine_reads(r2, r4):
                                description=desc, letter_annotations=quality)
 
 
-def seq_neighborhood(seq, name, n_subs=2):
+def seq_neighborhood(seq, name, nsubs=2):
     """
     Generate a sequence neighborhood for a given reference sequence
 
-    Given a sequence, yield all sequences within `n_subs` substitutions of 
+    Given a sequence, yield all sequences within `nsubs` substitutions of 
     that sequence by looping through each combination of base pairs within
     each combination of positions.
 
@@ -48,7 +49,7 @@ def seq_neighborhood(seq, name, n_subs=2):
         Reference sequence for neighbor generation. Example: library index.
     name : str
         Class/name for reference sequence. Example: library name.
-    n_subs : int, optional
+    nsubs : int, optional
         Number of sub
     
     Returns
@@ -62,11 +63,11 @@ def seq_neighborhood(seq, name, n_subs=2):
     Adapted from https://github.com/indrops/indrops
     """
     neighborhoods = {}
-    for positions in itertools.combinations(range(len(seq)), n_subs):
-    # yields all unique combinations of indices for n_subs mutations
-        for subs in itertools.product(*("ATGCN",)*n_subs):
+    for positions in itertools.combinations(range(len(seq)), nsubs):
+    # yields all unique combinations of indices for nsubs mutations
+        for subs in itertools.product(*("ATGCN",)*nsubs):
         # yields all combinations of possible nucleotides for strings of length
-        # n_subs
+        # nsubs
             seq_copy = list(seq)
             for p, s in zip(positions, subs):
                 seq_copy[p] = s
@@ -98,17 +99,17 @@ def get_library(seq, neighborhoods):
     except KeyError:
         return 'ambig'
 
-def open_library_fastqs(libraries, out_dir=''):
+def open_library_fastqs(libraries, prefix=''):
     """Open all fastq IO objects."""
     io_dict = {}
     for name in libraries.values():
-        io_dict[name] = {'cdna': open(os.path.join(out_dir,
-                                      "{}_cdna.fastq".format(name)), 'w'),
-                         'bc_umi': open(os.path.join(out_dir,
-                                        "{}_bc_umi.fastq".format(name)), 'w')}
+        io_dict[name] = {'cdna': open(prefix + \
+                                      "{}_cdna.fastq".format(name), 'w'),
+                         'bc_umi': open(prefix + \
+                                        "{}_bc_umi.fastq".format(name), 'w')}
         if name == 'ambig':
-            io_dict[name]['index'] = open(os.path.join(out_dir,
-                                          '{}_library_idx.fastq'.format(name)),
+            io_dict[name]['index'] = open(prefix + \
+                                          '{}_library_idx.fastq'.format(name),
                                           mode='w')
     # reads for non-mapped
     return io_dict
@@ -120,7 +121,7 @@ def close_fastqs(fastq_dict):
             every.close()
 
 def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq,
-                        libraries, out_dir='', n_subs=2):
+                        libraries, prefix='', nsubs=2):
     """
     Demultiplex Indrops V3 Reads.
 
@@ -143,26 +144,27 @@ def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq,
     libraries : dict
         Dictionary maping library index sequences to library names. Example
         `{"ATTAGAGG": "ASW-18hpf}
-    out_dir : str, optional
-        Where to write weaved fastq files. Current directory by default.
-    n_subs : int, optional
+    prefix : str, optional
+        Prefix/path to append to beginning of output files. Default is '', and
+        no prefix is appended.
+    nsubs : int, optional
         Allowable number of mismatches when matching libraries, by default 2.
     """
-    if not os.path.exists(out_dir):
-        os.makedirs(out_dir)
+    if not os.path.exists(os.path.split(prefix)[0]):
+        os.makedirs(os.path.split(prefix)[0])
     # create IO objects to access reads 
     reads = [SeqIO.parse(x, format='fastq') for x in [r1_fastq, r2_fastq,
                                                       r3_fastq, r4_fastq]]
     # construct dictionary mapping allowable library indices to library names
     library_neighborhoods = {}
     for index, name in libraries.items():
-        library_neighborhoods.update(seq_neighborhood(index, name, n_subs))
+        library_neighborhoods.update(seq_neighborhood(index, name, nsubs))
     # create extra key '' for unmatched library reads
     libraries['ambig'] = "ambig"
 
     # open library segregated fastq files
     # --> dict[library] = {'<library>_cdna.fastq', '<library>_bc_umi.fastq'}
-    fastqs = open_library_fastqs(libraries, out_dir)
+    fastqs = open_library_fastqs(libraries, prefix)
     # maybe barcode correct just in case?
     for r1, r2, r3, r4 in zip(*reads):
         # match library index to library name
@@ -178,3 +180,17 @@ def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq,
 
     # close all file objects
     close_fastqs(fastqs)
+
+if __name__ == "__main__":
+    try:
+        snakemake
+    except NameError:
+        snakemake = None
+    if snakemake is not None:
+        parse_indrops_reads(snakemake.input['r1'],
+                            snakemake.input['r2'],
+                            snakemake.input['r3'],
+                            snakemake.input['r4'],
+                            snakemake.params['libraries']
+                            prefix=snakemake.params['prefix'],
+                            nsubs=snakemake.params['nsubs'])
