@@ -12,10 +12,12 @@ READS = ['R1', 'R2', 'R3', 'R4']
 
 rule all:
     input:
-        expand(os.path.join(config['project']['dir'],
-                            'processed', 'STAR', '{library}',
-                            'Solo.out/Gene/raw/matrix.mtx'),
-               library=LIBRARIES),
+        # expand(os.path.join(config['project']['dir'],
+        #                     'processed', 'STAR', '{library}',
+        #                     'Solo.out/Gene/raw/matrix.mtx'),
+        #        library=LIBRARIES),
+        os.path.join(config['project']['dir'],
+                           'kallisto', 'lv_index.idx'),
         os.path.join(config['project']['dir'],
                      'summaries', 'reads', 'read_counts.png')
 
@@ -147,48 +149,82 @@ rule plot_library_read_counts:
     script:
         "scripts/plot_library_read_counts.py"
 
-rule build_star_index:
+rule build_kallisto_index:
     input:
-        fasta=config['genoome']['fastq'],
-        gff3=config['genome']['gff'],
-    params:
-        index_dir=config['STAR']['index'],
-        chr_n_bits=utils.estimate_STAR_ChrBinNbits(config['genome_fa'], 60),
+        fasta=config['genome']['fasta'],
+        gtf=config['genome']['gtf'],
     output:
-        os.path.join(config['STAR']['index'], 'Genome')
+        index=os.path.join(config['project']['dir'],
+                           'kallisto', 'lv_index.idx'),
+        t2g=os.path.join(config['project']['dir'],
+                         'kallisto', 'transcript_to_genes.txt'),
+        cdna=os.path.join(config['project']['dir'],
+                         'kallisto', 'cdna.fa')
     shell:
-        "STAR --runMode genomeGenerate --genomeDir {params.index_dir} "
-        "--genomeFastaFiles {input.fasta} --sjdbGTFfile {input.gff3} "
-        "--sjdbOverhang 60 --genomeChrBinNbits {params.chr_n_bits} "
-        "--sjdbGTFtagExonParentTranscript Parent"
+        "kb ref -i {output.index} -g {output.t2g} -f1 {output.cdna} "
+        "{input.fasta} {input.gtf}"
 
-rule run_star_solo:
+rule count_pseudo_align:
     input:
-        index=os.path.join(config['STAR']['index'], 'Genome'),
-        cdna=os.path.join(config['project']['dir'], 
-                          'processed', 'fastq', 'combined',
-                          '{library}_cdna.fastq'),
-        bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'combined',
-                            '{library}_bc_umi.fastq'),
-        whitelist="ref/gel_barcode3_list.txt"
+        index=os.path.join(config['project']['dir'],
+                           'kallisto', 'lv_index.idx'),
+        t2g=os.path.join(config['project']['dir'],
+                         'kallisto', 'transcript_to_genes.txt')
+        cdna="",
+        bc="",
+        bc_umi="",
     params:
-        index=config['STAR']['index'],
-        out=os.path.join(config['project']['dir'],
-                         'processed', 'STAR', '{library}')
+        out=os.path.join(config['project']['dir'], 'kallisto', 'counts',
+                         "{library}")
     output:
-        mtx=os.path.join(config['project']['dir'],
-                         'processed', 'STAR', '{library}',
-                         'Solo.out/Gene/raw/matrix.mtx'),
-        barcodes=os.path.join(config['project']['dir'],
-                              'processed', 'STAR', '{library}',
-                              'Solo.out/Gene/raw/barcodes.tsv'),
-        features=os.path.join(config['project']['dir'],
-                              'processed', 'STAR', '{library}',
-                              'Solo.out/Gene/raw/features.tsv')
+        out=os.path.join(config['project']['dir'], 'kallisto', 'counts',
+                         "{library}")
     shell:
-        "STAR --genomeDir {params.index}"
-        "--readFilesIn {input.cdna} {input.bc_umi} --soloType CB_UMI_Simple "
-        "--soloCBwhitelist {input.whitelist} --soloFeatures Gene SJ GeneFull "
-        "--soloStrand Unstranded Forward --outFileNamePrefix {params.out} "
-        "--soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 6"
+        "kb count -i {input.index} -g {input.t2g} -x indropsv3 "
+        "-o {params.out} {input.bc} {input.bc_umi} {input.cdna}"
+
+# rule build_star_index:
+#     input:
+#         fasta=config['genome']['fasta'],
+#         gff3=config['genome']['gff'],
+#     params:
+#         index_dir=config['STAR']['index'],
+#         chr_n_bits=utils.estimate_STAR_ChrBinNbits(config['genome']['fasta'], 60),
+#     output:
+#         os.path.join(config['STAR']['index'], 'Genome')
+#     shell:
+#         "STAR --runMode genomeGenerate --genomeDir {params.index_dir} "
+#         "--genomeFastaFiles {input.fasta} --sjdbGTFfile {input.gff3} "
+#         "--sjdbOverhang 60 --genomeChrBinNbits {params.chr_n_bits} "
+#         "--sjdbGTFtagExonParentTranscript Parent"
+
+# rule run_star_solo:
+#     input:
+#         index=os.path.join(config['STAR']['index'], 'Genome'),
+#         cdna=os.path.join(config['project']['dir'], 
+#                           'processed', 'fastq', 'combined',
+#                           '{library}_cdna.fastq'),
+#         bc_umi=os.path.join(config['project']['dir'],
+#                             'processed', 'fastq', 'combined',
+#                             '{library}_bc_umi.fastq'),
+#         whitelist="ref/gel_barcode3_list.txt"
+#     params:
+#         index=config['STAR']['index'],
+#         out=os.path.join(config['project']['dir'],
+#                          'processed', 'STAR', '{library}')
+#     output:
+#         mtx=os.path.join(config['project']['dir'],
+#                          'processed', 'STAR', '{library}',
+#                          'Solo.out/Gene/raw/matrix.mtx'),
+#         barcodes=os.path.join(config['project']['dir'],
+#                               'processed', 'STAR', '{library}',
+#                               'Solo.out/Gene/raw/barcodes.tsv'),
+#         features=os.path.join(config['project']['dir'],
+#                               'processed', 'STAR', '{library}',
+#                               'Solo.out/Gene/raw/features.tsv')
+#     shell:
+#         "STAR --genomeDir {params.index} "
+#         "--readFilesIn {input.cdna} {input.bc_umi} --soloType CB_UMI_Simple "
+#         "--soloCBwhitelist {input.whitelist} --soloFeatures Gene SJ GeneFull "
+#         "--soloStrand Unstranded Forward --outFileNamePrefix {params.out} "
+#         "--soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 6"
