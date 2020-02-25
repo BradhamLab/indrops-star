@@ -99,6 +99,7 @@ def get_library(seq, neighborhoods):
     except KeyError:
         return 'ambig'
 
+    
 def open_library_fastqs(libraries, prefix=''):
     """Open all fastq IO objects."""
     io_dict = {}
@@ -114,12 +115,42 @@ def open_library_fastqs(libraries, prefix=''):
     # reads for non-mapped
     return io_dict
 
+
 def close_fastqs(fastq_dict):
     """Close all fastq IO objects."""
     for each in fastq_dict:
         for every in fastq_dict[each].values():
             every.close()
 
+            
+def write_to_fastq(reads, fastqs):
+    """
+    Write reads to library-specific fastq files.
+
+    Parameters
+    ----------
+        reads : dict
+            Dictionary containing library-segregated reads.
+        fastqs : list
+            Dictionary holding library-specific fastq files. Output from
+            `open_library_dict()`.
+    """
+    for library in fastqs.keys():
+        SeqIO.write(reads[library]['cdna'], fastqs[library]['cdna'], 'fastq')
+        SeqIO.write(reads[library]['bc_umi'], fastqs[library]['bc_umi'], 'fastq')
+    if library == 'ambig':
+            SeqIO.write(reads[library]['index'], fastqs[library]['index'],
+                        'fastq')
+
+            
+def clear_reads(reads):
+    """Clear current stored reads."""
+    for library in reads:
+        for key, value in reads[library].items():
+            del value
+            reads[library][key] = []
+
+            
 def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq,
                         libraries, prefix='', nsubs=2):
     """
@@ -150,8 +181,10 @@ def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq,
     nsubs : int, optional
         Allowable number of mismatches when matching libraries, by default 2.
     """
-    if not os.path.exists(os.path.split(prefix)[0]):
-        os.makedirs(os.path.split(prefix)[0])
+    if prefix != '' and not os.path.exists(os.path.basename(prefix)):
+        os.makedirs(os.path.basename(prefix))
+    if prefix != '' and prefix == os.path.basename(prefix):
+        prefix = prefix + '/'
     # create IO objects to access reads 
     reads = [SeqIO.parse(x, format='fastq') for x in [r1_fastq, r2_fastq,
                                                       r3_fastq, r4_fastq]]
@@ -163,23 +196,34 @@ def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq,
     libraries['ambig'] = "ambig"
 
     # open library segregated fastq files
-    # --> dict[library] = {'<library>_cdna.fastq', '<library>_bc_umi.fastq'}
+    # dict[library] = {'<library>_cdna.fastq', -- bio read
+    #                  '<library>_index.fastq', -- library index read
+    #                  '<library>_bc_umi.fastq'} -- combined bc halves, umi, + polyA 
     fastqs = open_library_fastqs(libraries, prefix)
-    # maybe barcode correct just in case?
+    library_dict = {name: {'cdna': [], 'index': [], 'bc_umi': []}\
+                   for name in libraries.values()}
+    # might be a way to use generators for speed -- unsure how to filter 
+    # multiple read files using generator based off of r3, though.
+    records = 0
     for r1, r2, r3, r4 in zip(*reads):
         # match library index to library name
         library = get_library(r3, library_neighborhoods)
-        # combine barcode halves + umi + polyA
-        bc_umi = combine_reads(r2, r4)
-        # write bio read to library segregated fastq
-        SeqIO.write(r1, fastqs[library]['cdna'], 'fastq')
-        # write bc+umi read to library segregated fastq
-        SeqIO.write(bc_umi, fastqs[library]['bc_umi'], 'fastq')
+        library_dict[library]['cdna'].append(r1)
+        library_dict[library]['bc_umi'].append(combine_reads(r2, r4))
         if library == 'ambig':
-            SeqIO.write(r3, fastqs[library]['index'], 'fastq')
-
+            library_dict[library]['index'].append(r3)
+        records += 1
+        # write and clear reads every 100,000 records
+        if records % 100000 == 0:
+            # write current reads
+            write_to_fastq(library_dict, fastqs)
+            # clear written reads
+            clear_reads(library_dict)
+    # write any remaining reads
+    write_to_fastq(library_dict, fastqs)
     # close all file objects
     close_fastqs(fastqs)
+
 
 if __name__ == "__main__":
     try:
