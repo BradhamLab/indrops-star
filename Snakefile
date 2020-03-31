@@ -149,11 +149,11 @@ rule plot_library_read_counts:
 
 rule build_star_index:
     input:
-        fasta=config['genoome']['fastq'],
+        fasta=config['genome']['fasta'],
         gff3=config['genome']['gff'],
     params:
         index_dir=config['STAR']['index'],
-        chr_n_bits=utils.estimate_STAR_ChrBinNbits(config['genome_fa'], 60),
+        chr_n_bits=utils.estimate_STAR_ChrBinNbits(config['genome']['fasta'], 60),
     output:
         os.path.join(config['STAR']['index'], 'Genome')
     shell:
@@ -191,4 +191,4 @@ rule run_star_solo:
         "--readFilesIn {input.cdna} {input.bc_umi} --soloType CB_UMI_Simple "
         "--soloCBwhitelist {input.whitelist} --soloFeatures Gene SJ GeneFull "
         "--soloStrand Unstranded Forward --outFileNamePrefix {params.out} "
-        "--soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 6"
+        "--soloCBstart 1 --soloCBlen 16 --soloUMIstart 18 --soloUMIlen 6"
