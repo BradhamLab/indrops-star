@@ -27,3 +27,5 @@ From the head of the repo, execuate the pipeline by issueing the following comma
 conda activate indrops-star
 snakemake
 ```
+
+For more information for on `Snakemake` see the [documentation](https://snakemake.readthedocs.io/en/stable/) for more information. 
