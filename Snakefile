@@ -154,7 +154,7 @@ rule build_star_index:
     params:
         index_dir=config['STAR']['index'],
         chr_n_bits=utils.estimate_STAR_ChrBinNbits(config['genome']['fasta'], 60),
-        indexNBases=13
+        extra=config['params']['star_index']
     log:
         "logs/star_index.log"
     output:
@@ -162,9 +162,7 @@ rule build_star_index:
     shell:
         "(STAR --runMode genomeGenerate --genomeDir {params.index_dir} "
         "--genomeFastaFiles {input.fasta} --sjdbGTFfile {input.gtf} "
-        "--sjdbOverhang 60 --genomeChrBinNbits {params.chr_n_bits} "
-        "--sjdbGTFtagExonParentTranscript Parent "
-        "--genomeSAindexNbases {params.indexNBases}) > {log}"
+        "--genomeChrBinNbits {params.chr_n_bits} {params.extra}) > {log}"
 
 rule run_star_solo:
     input:
@@ -179,7 +177,8 @@ rule run_star_solo:
     params:
         index=config['STAR']['index'],
         out=os.path.join(config['project']['dir'],
-                         'processed', 'STAR', '{library}')
+                         'processed', 'STAR', '{library}') + '/',
+        solo=config['params']['star_solo']
     output:
         mtx=os.path.join(config['project']['dir'],
                          'processed', 'STAR', '{library}',
@@ -197,4 +196,5 @@ rule run_star_solo:
         "--readFilesIn {input.cdna} {input.bc_umi} --soloType CB_UMI_Simple "
         "--soloCBwhitelist {input.whitelist} --soloFeatures Gene SJ GeneFull "
         "--soloStrand Unstranded Forward --outFileNamePrefix {params.out} "
-        "--soloCBstart 1 --soloCBlen 16 --soloUMIstart 18 --soloUMIlen 6) > {log}"
+        "--soloCBstart 1 --soloCBlen 16 --soloUMIstart 18 --soloUMIlen 6 "
+        "{params.solo}) > {log}"
