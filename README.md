@@ -7,7 +7,7 @@ Pipeline to analyze Indrops V3 data using starSolo
 
 #### Clone this repository
 
-``git clone https://github.com/BradhamLab/indrops-star/```
+```git clone https://github.com/BradhamLab/indrops-star/```
 
 #### Install `conda` environment
 
