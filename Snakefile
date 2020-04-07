@@ -164,7 +164,7 @@ rule build_star_index:
         "--genomeFastaFiles {input.fasta} --sjdbGTFfile {input.gtf} "
         "--sjdbOverhang 60 --genomeChrBinNbits {params.chr_n_bits} "
         "--sjdbGTFtagExonParentTranscript Parent "
-        "--genomeSAindexNbases {params.indexNBases}) 2> {log}"
+        "--genomeSAindexNbases {params.indexNBases}) > {log}"
 
 rule run_star_solo:
     input:
@@ -197,4 +197,4 @@ rule run_star_solo:
         "--readFilesIn {input.cdna} {input.bc_umi} --soloType CB_UMI_Simple "
         "--soloCBwhitelist {input.whitelist} --soloFeatures Gene SJ GeneFull "
         "--soloStrand Unstranded Forward --outFileNamePrefix {params.out} "
-        "--soloCBstart 1 --soloCBlen 16 --soloUMIstart 18 --soloUMIlen 6) 2> {log}"
+        "--soloCBstart 1 --soloCBlen 16 --soloUMIstart 18 --soloUMIlen 6) > {log}"
