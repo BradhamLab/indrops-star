@@ -1,0 +1,19 @@
+genome:
+  fasta: "your/genoma/sequences.fasta"
+  gtf: "your/genome/annotations.gtf"
+STAR:
+  index: "star/index/install/dir"
+project:
+  dir: "head/of/your/project/dir/Intensities/Basecalls"
+  id: "your-project-id"
+  libraries:
+    {"ATTAGAGG": "Library1", # Index was CCTCTAAT, reverse compliment: ATTAGAGG
+     "CGGAGAGA": "Library2", # Index was TCTCTCCG <==> CGGAGAGA
+     "CTAGTCGA": "Library3", # Index was TCGACTAG <==> CTAGTCGA
+     "AGCTAGAA": "Library4"} # Index was TTCTAGCT <==> AGCTAGAA
+params:
+  weave_fastqs:
+    mismatches: 2
+  star_index: "--sjdbOverhang 60 --genomeSAIndexNbases 13" # put extra STAR parameters to pass when building index here
+  star_solo: "--soloCBmatchWLtype 1MM_multi" # put extra STAR alignment parameters here
+  
