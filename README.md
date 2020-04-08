@@ -31,4 +31,4 @@ snakemake
 Final STARsolo output will be found in `<your/project/dir>/processed/STAR/`
 
 
-For more information for on `Snakemake` see the [documentation](https://snakemake.readthedocs.io/en/stable/) for more information. 
+For more information on `Snakemake` see the [documentation](https://snakemake.readthedocs.io/en/stable/) for more information. 
