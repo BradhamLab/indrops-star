@@ -30,7 +30,6 @@ rule extract_fastqs:
     shell:
         """
         cd {params.project_dir} 
-        module load bcl2fastq
         bcl2fastq --use-bases-mask y*,y*,y*,y* --mask-short-adapter-reads 0 --minimum-trimmed-read-length 0
         """
 
