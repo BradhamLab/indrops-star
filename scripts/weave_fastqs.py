@@ -1,5 +1,6 @@
 import os
 import itertools
+import gzip
 
 from Bio import SeqIO, SeqRecord
 
@@ -20,19 +21,18 @@ def combine_reads(r2, r4):
     Returns
     -------
     Bio.SeqRecord
-        Interleafed barcode + UMI read where the first 16 characters are the
-        cell barcode, the next 6 are the UMI, and the remainder is part of the
-        poly-A tail.
+        Interleafed barcode + UMI read where the first 8 characters are the UMI
+        and the next 16 characters are the cell barcode.
     """
     read_id = r2.id
-    desc = r2.description.split(' ')[0] + ' R2R4'
-    seq = ''
-    quality = {'phred_quality': []}
-    for read in [r2, r4]:
-        seq += read.seq
-        quality['phred_quality'] += read.letter_annotations['phred_quality']
+    desc = r2.description.split(' ')[0] + ' umi+bc'
+    seq = r4.seq[8:8 + 6] + r2.seq + r4.seq[:8]
+    quality = {'phred_quality': r4.letter_annotations['phred_quality'][-6:] \
+                              + r2.letter_annotations['phred_quality'] \
+                              + r4.letter_annotations['phred_quality'][:-6]}
     return SeqRecord.SeqRecord(seq=seq, id=read_id, name=read_id,
                                description=desc, letter_annotations=quality)
+
 
 
 def seq_neighborhood(seq, name, nsubs=2):
@@ -185,9 +185,14 @@ def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq,
         os.makedirs(os.path.basename(prefix))
     if prefix != '' and prefix == os.path.basename(prefix):
         prefix = prefix + '/'
-    # create IO objects to access reads 
-    reads = [SeqIO.parse(x, format='fastq') for x in [r1_fastq, r2_fastq,
-                                                      r3_fastq, r4_fastq]]
+    # create IO objects to access reads
+    fastq_handles = []
+    reads = []
+    for x in [r1_fastq, r2_fastq, r3_fastq, r4_fastq]:
+        handle = gzip.open(x, 'rt')
+        reads.append(SeqIO.parse(handle, 'fastq'))
+        fastq_handles.append(handle)
+
     # construct dictionary mapping allowable library indices to library names
     library_neighborhoods = {}
     for index, name in libraries.items():
@@ -221,8 +226,11 @@ def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq,
             clear_reads(library_dict)
     # write any remaining reads
     write_to_fastq(library_dict, fastqs)
-    # close all file objects
+    # close all output file objects
     close_fastqs(fastqs)
+    # close all input file objects
+    for handle in fastq_handles:
+        handle.close()
 
 
 if __name__ == "__main__":

@@ -9,20 +9,23 @@ LIBRARIES = config['project']['libraries'].values()
 SPLITS = ['L{}{}'.format('0'*(3 - len(str(n))), n)\
           for n in range(1, len(LIBRARIES) + 1)]
 READS = ['R1', 'R2', 'R3', 'R4']
-GENE_FEATURES = ['Gene', 'GeneFull']
 
 rule all:
     input:
+        # mtx=expand(os.path.join(config['project']['dir'],
+        #                         'processed', 'STAR', '{library}', 'Solo.out',
+        #                         'Gene', 'raw', 'matrix.mtx'),
+        #            library=LIBRARIES)
         expand(os.path.join(config['project']['dir'],
-                            'processed', 'STAR', '{library}',
-                            'Solo.out/Gene/raw/matrix.mtx'),
-               library=LIBRARIES),
-        os.path.join(config['project']['dir'],
-                     'summaries', 'reads', 'read_counts.png'),
-        expand(os.path.join(config['project']['dir'], 'processed', 'matrices',
-                            '{feature}.loom'),
-               feature=GENE_FEATURES)
-
+                                 'processed', 'fastq', 'weaved_2',
+                                 '{split}_' + f'{list(LIBRARIES)[0]}_cdna.fastq'),
+               split=SPLITS, allow_missing=True)
+        # expand(os.path.join(config['project']['dir'],
+        #                     'processed', 'STAR', '{library}',
+        #                     'Solo.out/Gene/raw/matrix.mtx'),
+        #        library=LIBRARIES),
+        # os.path.join(config['project']['dir'],
+        #              'summaries', 'reads', 'read_counts.png'),
 rule extract_fastqs:
     output:
         expand(os.path.join(config['project']['dir'],
@@ -51,26 +54,30 @@ rule unzip_fastqs:
 rule weave_fastqs:
     input:
         r1=os.path.join(config['project']['dir'],
-                        'tmp', '{split}_R1_001.fastq'),
+                      'Data', 'Intensities', 'BaseCalls',
+                      'Undetermined_S0_{split}_r1_001.fastq.gz'),
         r2=os.path.join(config['project']['dir'],
-                        'tmp', '{split}_R2_001.fastq'),
+                      'Data', 'Intensities', 'BaseCalls',
+                      'Undetermined_S0_{split}_r2_001.fastq.gz')
         r3=os.path.join(config['project']['dir'],
-                        'tmp', '{split}_R3_001.fastq'),
+                      'Data', 'Intensities', 'BaseCalls',
+                      'Undetermined_S0_{split}_r3_001.fastq.gz'),
         r4=os.path.join(config['project']['dir'],
-                        'tmp', '{split}_R4_001.fastq')
+                      'Data', 'Intensities', 'BaseCalls',
+                      'Undetermined_S0_{split}_r4_001.fastq.gz'),
     params:
         prefix= os.path.join(config['project']['dir'],
-                             'processed', 'fastq', 'weaved',
+                             'processed', 'fastq', 'weaved_2',
                              '{split}_'),
         libraries=config['project']['libraries'],
         nsubs=config['params']['weave_fastqs']['mismatches']
     output:
         temp(expand(os.path.join(config['project']['dir'],
-                                 'processed', 'fastq', 'weaved',
+                                 'processed', 'fastq', 'weaved_2',
                                  '{{split}}_' + '{library}_cdna.fastq'),
                library=LIBRARIES, allow_missing=True)),
         temp(expand(os.path.join(config['project']['dir'],
-                                 'processed', 'fastq', 'weaved',
+                                 'processed', 'fastq', 'weaved_2',
                                  '{{split}}_' + '{library}_bc_umi.fastq'),
                library=LIBRARIES, allow_missing=True))
     script:
@@ -97,28 +104,28 @@ rule combine_fastqs:
         "cat {input.cdna} > {output.cdna}; "
         "cat {input.bc_umi} > {output.bc_umi};"
 
-rule trim_reads:
-    input:
-        cdna=os.path.join(config['project']['dir'], 
-                          'processed', 'fastq', 'combined',
-                          '{library}_cdna.fastq'),
-        bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'combined',
-                            '{library}_bc_umi.fastq')
-    output:
-        cdna=os.path.join(config['project']['dir'], 
-                          'processed', 'fastq', 'trimmed',
-                          '{library}_cdna.fastq'),
-        bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'trimmed',
-                            '{library}_bc_umi.fastq')
-    params:
-        cores=config['params']['cutadapt']['cores']
-        minlength=config['params']['cutadapt']['minlength']
-    shell:
-        "cutadapt --cores {params.cores} --minimum-length {params.minlength} " \
-        "--output {output.cdna} --paired-output {output.bc_umi} " \
-        "{input.cdna} {input.bc_umi}"
+# rule trim_reads:
+#     input:
+#         cdna=os.path.join(config['project']['dir'], 
+#                           'processed', 'fastq', 'combined',
+#                           '{library}_cdna.fastq'),
+#         bc_umi=os.path.join(config['project']['dir'],
+#                             'processed', 'fastq', 'combined',
+#                             '{library}_bc_umi.fastq')
+#     output:
+#         cdna=os.path.join(config['project']['dir'], 
+#                           'processed', 'fastq', 'trimmed',
+#                           '{library}_cdna.fastq'),
+#         bc_umi=os.path.join(config['project']['dir'],
+#                             'processed', 'fastq', 'trimmed',
+#                             '{library}_bc_umi.fastq')
+#     params:
+#         cores=config['params']['cutadapt']['cores'],
+#         minlength=config['params']['cutadapt']['minlength']
+#     shell:
+#         "cutadapt --cores {params.cores} --minimum-length {params.minlength} " \
+#         "--output {output.cdna} --paired-output {output.bc_umi} " \
+#         "{input.cdna} {input.bc_umi}"
 
 
 ## summarize reads per library + ambig
@@ -133,6 +140,7 @@ rule count_reads_per_library:
                                  '{library}_read_counts.csv'))
     shell:
         "echo $(awk {{s++}}END{{print\ s/4}} {input.cdna}),{wildcards.library} > {output}"
+
 
 rule count_ambig_reads:
     input:
@@ -205,26 +213,24 @@ rule run_star_solo:
         index=config['STAR']['index'],
         out=os.path.join(config['project']['dir'],
                          'processed', 'STAR', '{library}') + '/',
-        solo=config['params']['star_solo']
+        solo=" ".join(f"--{k} {v}" for k, v in config['params']['star_solo'].items())
     output:
         mtx=expand(os.path.join(config['project']['dir'],
                                 'processed', 'STAR', '{{library}}', 'Solo.out',
-                                '{feature}', 'raw', 'matrix.mtx'),
-                   feature=GENE_FEATURES),
+                                'Gene', 'raw', 'matrix.mtx')),
         barcodes=expand(os.path.join(config['project']['dir'],
                                      'processed', 'STAR', '{{library}}', 'Solo.out',
-                                     '{feature}', 'raw', 'barcodes.tsv'),
-                        feature=GENE_FEATURES),
+                                     'Gene', 'raw', 'barcodes.tsv')),
         features=expand(os.path.join(config['project']['dir'],
                                      'processed', 'STAR', '{{library}}', 'Solo.out',
-                                     '{feature}', 'raw', 'features.tsv'),
-                        feature=GENE_FEATURES)
+                                     'Gene', 'raw', 'features.tsv'))
     log:
         "logs/{library}_starsolo.log"
     shell:
         "(STAR --genomeDir {params.index} "
         "--readFilesIn {input.cdna} {input.bc_umi} --soloType CB_UMI_Simple "
         "--soloCBwhitelist {input.whitelist} --soloFeatures Gene SJ GeneFull "
-        "--soloStrand Unstranded Forward --outFileNamePrefix {params.out} "
+        "--soloStrand Unstranded [Reverse/Forward] --outFileNamePrefix {params.out} "
         "--soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 6 "
-        "{params.solo}) > {log}"
+        "{params.solo}) 2> {log}"
+
