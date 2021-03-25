@@ -15,11 +15,19 @@ rule all:
         # mtx=expand(os.path.join(config['project']['dir'],
         #                         'processed', 'STAR', '{library}', 'Solo.out',
         #                         'Gene', 'raw', 'matrix.mtx'),
-        #            library=LIBRARIES)
-        expand(os.path.join(config['project']['dir'],
-                                 'processed', 'fastq', 'weaved_2',
-                                 '{split}_' + f'{list(LIBRARIES)[0]}_cdna.fastq'),
-               split=SPLITS, allow_missing=True)
+        #            library=LIBRARIES),
+        expand(os.path.join(config['project']['dir'], 'summaries',
+                     '{library}_reads_per_barcode.csv'),
+               library=LIBRARIES)
+        # expand(os.path.join(config['project']['dir'],
+        #                     'Data', 'Intensities', 'BaseCalls',
+        #                     'Undetermined_S0_{split}_{r}_001.fastq.gz'),
+        #        split=SPLITS, r=READS),
+        
+        # expand(os.path.join(config['project']['dir'],
+        #                          'processed', 'fastq', 'weaved',
+        #                          '{split}_' + f'{list(LIBRARIES)[0]}_cdna.fastq'),
+        #        split=SPLITS, allow_missing=True)
         # expand(os.path.join(config['project']['dir'],
         #                     'processed', 'STAR', '{library}',
         #                     'Solo.out/Gene/raw/matrix.mtx'),
@@ -55,31 +63,34 @@ rule weave_fastqs:
     input:
         r1=os.path.join(config['project']['dir'],
                       'Data', 'Intensities', 'BaseCalls',
-                      'Undetermined_S0_{split}_r1_001.fastq.gz'),
+                      'Undetermined_S0_{split}_R1_001.fastq.gz'),
         r2=os.path.join(config['project']['dir'],
                       'Data', 'Intensities', 'BaseCalls',
-                      'Undetermined_S0_{split}_r2_001.fastq.gz')
+                      'Undetermined_S0_{split}_R2_001.fastq.gz'),
         r3=os.path.join(config['project']['dir'],
                       'Data', 'Intensities', 'BaseCalls',
-                      'Undetermined_S0_{split}_r3_001.fastq.gz'),
+                      'Undetermined_S0_{split}_R3_001.fastq.gz'),
         r4=os.path.join(config['project']['dir'],
                       'Data', 'Intensities', 'BaseCalls',
-                      'Undetermined_S0_{split}_r4_001.fastq.gz'),
+                      'Undetermined_S0_{split}_R4_001.fastq.gz'),
     params:
         prefix= os.path.join(config['project']['dir'],
-                             'processed', 'fastq', 'weaved_2',
+                             'processed', 'fastq', 'weaved',
                              '{split}_'),
         libraries=config['project']['libraries'],
         nsubs=config['params']['weave_fastqs']['mismatches']
     output:
         temp(expand(os.path.join(config['project']['dir'],
-                                 'processed', 'fastq', 'weaved_2',
+                                 'processed', 'fastq', 'weaved',
                                  '{{split}}_' + '{library}_cdna.fastq'),
                library=LIBRARIES, allow_missing=True)),
-        temp(expand(os.path.join(config['project']['dir'],
-                                 'processed', 'fastq', 'weaved_2',
-                                 '{{split}}_' + '{library}_bc_umi.fastq'),
-               library=LIBRARIES, allow_missing=True))
+        os.path.join(config['project']['dir'],
+                                 'processed', 'fastq', 'weaved',
+                                 '{{split}}_' + 'ambig_library_idx.fastq')
+        # temp(expand(os.path.join(config['project']['dir'],
+        #                          'processed', 'fastq', 'weaved_2',
+        #                          '{{split}}_' + '{library}_bc_umi.fastq'),
+        #        library=LIBRARIES, allow_missing=True))
     script:
         "scripts/weave_fastqs.py"
 
@@ -104,29 +115,34 @@ rule combine_fastqs:
         "cat {input.cdna} > {output.cdna}; "
         "cat {input.bc_umi} > {output.bc_umi};"
 
-# rule trim_reads:
-#     input:
-#         cdna=os.path.join(config['project']['dir'], 
-#                           'processed', 'fastq', 'combined',
-#                           '{library}_cdna.fastq'),
-#         bc_umi=os.path.join(config['project']['dir'],
-#                             'processed', 'fastq', 'combined',
-#                             '{library}_bc_umi.fastq')
-#     output:
-#         cdna=os.path.join(config['project']['dir'], 
-#                           'processed', 'fastq', 'trimmed',
-#                           '{library}_cdna.fastq'),
-#         bc_umi=os.path.join(config['project']['dir'],
-#                             'processed', 'fastq', 'trimmed',
-#                             '{library}_bc_umi.fastq')
-#     params:
-#         cores=config['params']['cutadapt']['cores'],
-#         minlength=config['params']['cutadapt']['minlength']
-#     shell:
-#         "cutadapt --cores {params.cores} --minimum-length {params.minlength} " \
-#         "--output {output.cdna} --paired-output {output.bc_umi} " \
-#         "{input.cdna} {input.bc_umi}"
 
+rule count_reads_per_barcode:
+    input:
+        bc_umi=os.path.join(config['project']['dir'],
+                            'processed', 'fastq', 'combined',
+                            '{library}_bc_umi.fastq'),
+    output:
+        os.path.join(config['project']['dir'], 'processed', 'reads',
+                     '{library}_reads_per_barcode.csv')
+    shell:
+        "awk 'NR % 4 == 2' {input.bc_umi} | cut -c 1-16 | sort | uniq -c | sort -nr > {output}"
+
+rule match_and_plot_barcode_reads:
+    input:
+        counts=os.path.join(config['project']['dir'], 'processed', 'reads',
+                     '{library}_reads_per_barcode.csv'),
+        whitelist="ref/gel_barcode3_list.txt"
+    output:
+        csv=os.path.join(config['project']['dir'], 'summaries',
+                         '{library}_reads_per_barcode.csv'),
+        summary=os.path.join(config['project']['dir'], 'summaries',
+                         '{library}_reads_per_barcode_summary.csv'),
+        pdf=os.path.join(config['project']['dir'], 'summaries',
+                         '{library}_read_per_barcode_pdf.png'),
+        cdf=os.path.join(config['project']['dir'], 'summaries',
+                         '{library}_read_per_barcode_cdf.png')
+    script:
+        "scripts/reads_per_barcode.py"
 
 ## summarize reads per library + ambig
 rule count_reads_per_library:
@@ -182,6 +198,27 @@ rule plot_library_read_counts:
     script:
         "scripts/plot_library_read_counts.py"
 
+
+rule filter_reads:
+    input:
+        cdna=os.path.join(config['project']['dir'], 
+                          'processed', 'fastq', 'combined',
+                          '{library}_cdna.fastq'),
+        bc_umi=os.path.join(config['project']['dir'],
+                            'processed', 'fastq', 'combined',
+                            '{library}_bc_umi.fastq')
+    output:
+        cdna=os.path.join(config['project']['dir'], 
+                          'processed', 'fastq', 'filtered',
+                          '{library}_cdna.fastq'),
+        bc_umi=os.path.join(config['project']['dir'],
+                            'processed', 'fastq', 'filtered',
+                            '{library}_bc_umi.fastq')
+    shell:
+        "fastp -i {input.cdna} -I {input.bc_umi} -U --umi_loc index2 "
+        "-o {output.cdna} -O {output.bc_umi} -A -L -G"
+
+
 rule build_star_index:
     input:
         fasta=config['genome']['fasta'],
@@ -203,10 +240,10 @@ rule run_star_solo:
     input:
         index=os.path.join(config['STAR']['index'], 'Genome'),
         cdna=os.path.join(config['project']['dir'], 
-                          'processed', 'fastq', 'combined',
+                          'processed', 'fastq', 'filtered',
                           '{library}_cdna.fastq'),
         bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'combined',
+                            'processed', 'fastq', 'filtered',
                             '{library}_bc_umi.fastq'),
         whitelist="ref/gel_barcode3_list.txt"
     params:
@@ -215,15 +252,15 @@ rule run_star_solo:
                          'processed', 'STAR', '{library}') + '/',
         solo=" ".join(f"--{k} {v}" for k, v in config['params']['star_solo'].items())
     output:
-        mtx=expand(os.path.join(config['project']['dir'],
-                                'processed', 'STAR', '{{library}}', 'Solo.out',
-                                'Gene', 'raw', 'matrix.mtx')),
-        barcodes=expand(os.path.join(config['project']['dir'],
-                                     'processed', 'STAR', '{{library}}', 'Solo.out',
-                                     'Gene', 'raw', 'barcodes.tsv')),
-        features=expand(os.path.join(config['project']['dir'],
-                                     'processed', 'STAR', '{{library}}', 'Solo.out',
-                                     'Gene', 'raw', 'features.tsv'))
+        mtx=os.path.join(config['project']['dir'],
+                                'processed', 'STAR', '{library}', 'Solo.out',
+                                'Gene', 'raw', 'matrix.mtx'),
+        barcodes=os.path.join(config['project']['dir'],
+                                     'processed', 'STAR', '{library}', 'Solo.out',
+                                     'Gene', 'raw', 'barcodes.tsv'),
+        features=os.path.join(config['project']['dir'],
+                                     'processed', 'STAR', '{library}', 'Solo.out',
+                                     'Gene', 'raw', 'features.tsv')
     log:
         "logs/{library}_starsolo.log"
     shell:

@@ -13,7 +13,7 @@ def combine_reads(r2, r4):
     r2 : Bio.SeqRecord
         Read containing the first half of the gel barcode. Should be from the R2
         fastq from an indrops V3 run.
-    r4 : [type]
+    r4 : Bio.SeqRecord
         Read containing the second half of the gel barcode, the the UMI, and
         part of the poly-A tail. Should be from the R4 fastq from an indrops
         V3 run.
@@ -21,58 +21,132 @@ def combine_reads(r2, r4):
     Returns
     -------
     Bio.SeqRecord
-        Interleafed barcode + UMI read where the first 8 characters are the UMI
-        and the next 16 characters are the cell barcode.
+        Interleafed barcode + UMI read where the first 16 characters are the
+        cell barcode, and the next 6 are the UMI.
     """
     read_id = r2.id
-    desc = r2.description.split(' ')[0] + ' umi+bc'
-    seq = r4.seq[8:8 + 6] + r2.seq + r4.seq[:8]
-    quality = {'phred_quality': r4.letter_annotations['phred_quality'][-6:] \
-                              + r2.letter_annotations['phred_quality'] \
-                              + r4.letter_annotations['phred_quality'][:-6]}
+    desc = r2.description.split(' ')[0] + ' bc+umi'
+    # seq = r4.seq[8:8 + 6] + r2.seq + r4.seq[:8]
+    # quality = {'phred_quality': r4.letter_annotations['phred_quality'][-6:] \
+    #                           + r2.letter_annotations['phred_quality'] \
+    #                           + r4.letter_annotations['phred_quality'][:-6]}
+    seq = ''
+    quality = {'phred_quality': []}
+    for read in [r2, r4]:
+        seq += read.seq
+        quality['phred_quality'] += read.letter_annotations['phred_quality']
     return SeqRecord.SeqRecord(seq=seq, id=read_id, name=read_id,
                                description=desc, letter_annotations=quality)
 
 
-
-def seq_neighborhood(seq, name, nsubs=2):
+def seq_neighborhood(seq, n_subs=1):
     """
-    Generate a sequence neighborhood for a given reference sequence
+    Generate all n-substitution strings from sequence.
 
-    Given a sequence, yield all sequences within `nsubs` substitutions of 
+    Given a sequence, yield all sequences within n_subs substitutions of 
     that sequence by looping through each combination of base pairs within
     each combination of positions.
 
     Parameters
     ----------
-    seq : str
-        Reference sequence for neighbor generation. Example: library index.
-    name : str
-        Class/name for reference sequence. Example: library name.
-    nsubs : int, optional
-        Number of sub
+        seq : str
+            Base sequence to mutate over.
+        n_subs : int
+            Number of allowable substitutions.
     
     Returns
     -------
-    dict
-        Dictionary of neighborhood sequences such that each key is a neighboring
-        sequence and each value is the provided name.
-
+        Generator
+            All possible n-substitution strings
+    
     References
     ----------
-    Adapted from https://github.com/indrops/indrops
+        Taken from original indrops repository: github.com/indrops/indrops
     """
-    neighborhoods = {}
-    for positions in itertools.combinations(range(len(seq)), nsubs):
-    # yields all unique combinations of indices for nsubs mutations
-        for subs in itertools.product(*("ATGCN",)*nsubs):
+    for positions in combinations(range(len(seq)), n_subs):
+    # yields all unique combinations of indices for n_subs mutations
+        for subs in product(*("ATGCN",)*n_subs):
         # yields all combinations of possible nucleotides for strings of length
-        # nsubs
+        # n_subs
             seq_copy = list(seq)
             for p, s in zip(positions, subs):
                 seq_copy[p] = s
-            neighborhoods[''.join(seq_copy)] = name
-    return neighborhoods
+            yield ''.join(seq_copy)
+
+def get_whitelist(barcode_file):
+    """Get sequences from barcode file."""
+    sequences = []
+    with open(barcode_file, 'rU') as f:
+        # iterate through each barcode (rstrip cleans string of whitespace)
+        for line in f:
+            barcode = line.rstrip()
+            sequences.append(barcode)
+    return sequences
+
+
+def build_barcode_neighborhoods(sequences):
+    """
+    Create dictionary mapping observed barcodes to whitelist barcodes.
+
+    Given a set of barcodes, produce sequences which can unambiguously be
+    mapped to these barcodes, within 2 substitutions. If a sequence maps to 
+    multiple barcodes, get rid of it. However, if a sequences maps to a bc1 with 
+    1change and another with 2changes, keep the 1change mapping.
+
+    Parameters
+    ----------
+        sequences : list
+            List of sequences to generate neighborhoods for. 
+
+    Returns
+    -------
+        dict (str, str)
+            Dictionary where keys are mutated sequences and values corrected
+            sequences. 
+
+    References
+    ----------
+        Taken from original indrops repository: github.com/indrops/indrops
+    """
+
+    # contains all mutants that map uniquely to a barcode
+    clean_mapping = dict()
+
+    # contain single or double mutants 
+    mapping1 = defaultdict(set)
+    mapping2 = defaultdict(set)
+    
+    #Build the full neighborhood and iterate through barcodes
+    for seq in sequences:
+        # each barcode obviously maps to itself uniquely
+        clean_mapping[seq] = seq
+
+        # for each possible mutated form of a given barcode, either add
+        # the origin barcode into the set corresponding to that mutant or 
+        # create a new entry for a mutant not already in mapping1
+        # eg: barcodes CATG and CCTG would be in the set for mutant CTTG
+        # but only barcode CATG could generate mutant CANG
+        for n in seq_neighborhood(seq, 1):
+            mapping1[n].add(seq)
+        
+        # same as above but with double mutants
+        for n in seq_neighborhood(seq, 2):
+            mapping2[n].add(seq)   
+    
+    # take all single-mutants and find those that could only have come from one
+    # specific barcode
+    for k, v in mapping1.items():
+        if k not in clean_mapping:
+            if len(v) == 1:
+                clean_mapping[k] = list(v)[0]
+    
+    for k, v in mapping2.items():
+        if k not in clean_mapping:
+            if len(v) == 1:
+                clean_mapping[k] = list(v)[0]
+    del mapping1
+    del mapping2
+    return clean_mapping
 
 
 def get_library(seq, neighborhoods):
