@@ -1,10 +1,11 @@
 import os
 import itertools
 import gzip
+from collections import defaultdict
 
 from Bio import SeqIO, SeqRecord
 
-def combine_reads(r2, r4):
+def combine_reads(r2, r4, barcode_neighbors):
     """
     Combine R2 and R4 indrops v3 reads into barcode + UMI read.
     
@@ -35,6 +36,13 @@ def combine_reads(r2, r4):
     for read in [r2, r4]:
         seq += read.seq
         quality['phred_quality'] += read.letter_annotations['phred_quality']
+    # replace observed barcode sequence with expected sequence from whitelist
+    if seq[:16] in barcode_neighbors:
+        seq = barcode_neighbors[seq[:16]] + seq[16:]
+    # don't need poly A tail 
+    if len(seq) > 22:
+        seq = seq[:22]
+        quality['phred_quality'] = quality['phred_quality'][:22]
     return SeqRecord.SeqRecord(seq=seq, id=read_id, name=read_id,
                                description=desc, letter_annotations=quality)
 
@@ -75,27 +83,24 @@ def seq_neighborhood(seq, n_subs=1):
 
 def get_whitelist(barcode_file):
     """Get sequences from barcode file."""
-    sequences = []
     with open(barcode_file, 'rU') as f:
         # iterate through each barcode (rstrip cleans string of whitespace)
-        for line in f:
-            barcode = line.rstrip()
-            sequences.append(barcode)
-    return sequences
+        return (line.rstrip() for line in f)
 
 
-def build_barcode_neighborhoods(sequences):
+def build_sequence_neighborhoods(sequences):
     """
-    Create dictionary mapping observed barcodes to whitelist barcodes.
+    Create dictionary mapping allowable mutated sequence to expected sequence.
 
-    Given a set of barcodes, produce sequences which can unambiguously be
-    mapped to these barcodes, within 2 substitutions. If a sequence maps to 
-    multiple barcodes, get rid of it. However, if a sequences maps to a bc1 with 
-    1change and another with 2changes, keep the 1change mapping.
+    Given a set of sequences, produce mutated sequences which can unambiguously
+    be mapped to expected sequences, within 2 substitutions. If a mutatation
+    maps to  multiple sequences, get rid of it. However, if a mutation maps to
+    an expected sequence with 1change and another with 2changes,
+    keep the 1change mapping.
 
     Parameters
     ----------
-        sequences : list
+        sequences : list, generator
             List of sequences to generate neighborhoods for. 
 
     Returns
@@ -106,7 +111,7 @@ def build_barcode_neighborhoods(sequences):
 
     References
     ----------
-        Taken from original indrops repository: github.com/indrops/indrops
+        Modified from original indrops repository: github.com/indrops/indrops
     """
 
     # contains all mutants that map uniquely to a barcode
@@ -159,14 +164,13 @@ def get_library(seq, neighborhoods):
         Library index read from R3 fastq of an indrops V3 run.
     neighborhoods : dict
         Dictionary of neighboring sequences for each library index. Where each
-        key is a neighboring sequence, and each value is the associated library.
-        name.
+        key is a neighboring sequence, and each value is the expected library
+        index. 
     
     Returns
     -------
     str
-        Name of library associated with provided sequence. If sequence is not
-        present, returns "ambig".
+        Expected library index. If sequence is not present, returns "ambig".
     """
     try:
         return neighborhoods[str(seq.seq)]
@@ -225,8 +229,8 @@ def clear_reads(reads):
             reads[library][key] = []
 
             
-def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq,
-                        libraries, prefix='', nsubs=2):
+def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq, bc_file,
+                        libraries, prefix=''):
     """
     Demultiplex Indrops V3 Reads.
 
@@ -246,14 +250,14 @@ def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq,
     r4_fastq : str
         File path to fastq containing second half of cell barcodes, UMI, and
         portion of the polyA tail from an indrops v3 run.
+    bc_file : str
+        File path to barcode whitelist.
     libraries : dict
         Dictionary maping library index sequences to library names. Example
         `{"ATTAGAGG": "ASW-18hpf}
     prefix : str, optional
         Prefix/path to append to beginning of output files. Default is '', and
         no prefix is appended.
-    nsubs : int, optional
-        Allowable number of mismatches when matching libraries, by default 2.
     """
     if prefix != '' and not os.path.exists(os.path.basename(prefix)):
         os.makedirs(os.path.basename(prefix))
@@ -266,29 +270,29 @@ def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq,
         handle = gzip.open(x, 'rt')
         reads.append(SeqIO.parse(handle, 'fastq'))
         fastq_handles.append(handle)
-
+    # construct dictionary mapping allowable barcode mutationes to expected seqs
+    barcode_neighborhoods = build_sequence_neighborhoods(get_whitelist(bc_file))
     # construct dictionary mapping allowable library indices to library names
-    library_neighborhoods = {}
-    for index, name in libraries.items():
-        library_neighborhoods.update(seq_neighborhood(index, name, nsubs))
-    # create extra key '' for unmatched library reads
+    library_neighborhoods = build_sequence_neighborhoods(libraries.keys())
+    # create extra key for unmatched library reads
     libraries['ambig'] = "ambig"
-
     # open library segregated fastq files
     # dict[library] = {'<library>_cdna.fastq', -- bio read
     #                  '<library>_index.fastq', -- library index read
     #                  '<library>_bc_umi.fastq'} -- combined bc halves, umi, + polyA 
     fastqs = open_library_fastqs(libraries, prefix)
     library_dict = {name: {'cdna': [], 'index': [], 'bc_umi': []}\
-                   for name in libraries.values()}
+                    for name in libraries.values()}
     # might be a way to use generators for speed -- unsure how to filter 
     # multiple read files using generator based off of r3, though.
     records = 0
     for r1, r2, r3, r4 in zip(*reads):
         # match library index to library name
-        library = get_library(r3, library_neighborhoods)
+        library_seq = get_library(r3, library_neighborhoods)
+        library = libraries[library_seq]
         library_dict[library]['cdna'].append(r1)
-        library_dict[library]['bc_umi'].append(combine_reads(r2, r4))
+        library_dict[library]['bc_umi'].append(combine_reads(r2, r4),
+                                                          barcode_neighborhoods)
         if library == 'ambig':
             library_dict[library]['index'].append(r3)
         records += 1
@@ -317,6 +321,6 @@ if __name__ == "__main__":
                             snakemake.input['r2'],
                             snakemake.input['r3'],
                             snakemake.input['r4'],
+                            snakemake.input['whitelist'],
                             snakemake.params['libraries'],
-                            prefix=snakemake.params['prefix'],
-                            nsubs=snakemake.params['nsubs'])
+                            prefix=snakemake.params['prefix'])
