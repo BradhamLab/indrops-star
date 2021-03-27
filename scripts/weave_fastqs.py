@@ -1,183 +1,14 @@
-import os
-import itertools
 import gzip
-from collections import defaultdict
+import os
+import sys
+import json
 
 from Bio import SeqIO, SeqRecord
 
-def combine_reads(r2, r4, barcode_neighbors):
-    """
-    Combine R2 and R4 indrops v3 reads into barcode + UMI read.
-    
-    Parameters
-    ----------
-    r2 : Bio.SeqRecord
-        Read containing the first half of the gel barcode. Should be from the R2
-        fastq from an indrops V3 run.
-    r4 : Bio.SeqRecord
-        Read containing the second half of the gel barcode, the the UMI, and
-        part of the poly-A tail. Should be from the R4 fastq from an indrops
-        V3 run.
-    
-    Returns
-    -------
-    Bio.SeqRecord
-        Interleafed barcode + UMI read where the first 16 characters are the
-        cell barcode, and the next 6 are the UMI.
-    """
-    read_id = r2.id
-    desc = r2.description.split(' ')[0] + ' bc+umi'
-    # seq = r4.seq[8:8 + 6] + r2.seq + r4.seq[:8]
-    # quality = {'phred_quality': r4.letter_annotations['phred_quality'][-6:] \
-    #                           + r2.letter_annotations['phred_quality'] \
-    #                           + r4.letter_annotations['phred_quality'][:-6]}
-    seq = ''
-    quality = {'phred_quality': []}
-    for read in [r2, r4]:
-        seq += read.seq
-        quality['phred_quality'] += read.letter_annotations['phred_quality']
-    # replace observed barcode sequence with expected sequence from whitelist
-    if seq[:16] in barcode_neighbors:
-        seq = barcode_neighbors[seq[:16]] + seq[16:]
-    # don't need poly A tail 
-    if len(seq) > 22:
-        seq = seq[:22]
-        quality['phred_quality'] = quality['phred_quality'][:22]
-    return SeqRecord.SeqRecord(seq=seq, id=read_id, name=read_id,
-                               description=desc, letter_annotations=quality)
+sys.path.append('scripts')
+import seq_utils
 
-
-def seq_neighborhood(seq, n_subs=1):
-    """
-    Generate all n-substitution strings from sequence.
-
-    Given a sequence, yield all sequences within n_subs substitutions of 
-    that sequence by looping through each combination of base pairs within
-    each combination of positions.
-
-    Parameters
-    ----------
-        seq : str
-            Base sequence to mutate over.
-        n_subs : int
-            Number of allowable substitutions.
-    
-    Returns
-    -------
-        Generator
-            All possible n-substitution strings
-    
-    References
-    ----------
-        Taken from original indrops repository: github.com/indrops/indrops
-    """
-    for positions in combinations(range(len(seq)), n_subs):
-    # yields all unique combinations of indices for n_subs mutations
-        for subs in product(*("ATGCN",)*n_subs):
-        # yields all combinations of possible nucleotides for strings of length
-        # n_subs
-            seq_copy = list(seq)
-            for p, s in zip(positions, subs):
-                seq_copy[p] = s
-            yield ''.join(seq_copy)
-
-def get_whitelist(barcode_file):
-    """Get sequences from barcode file."""
-    with open(barcode_file, 'rU') as f:
-        # iterate through each barcode (rstrip cleans string of whitespace)
-        return (line.rstrip() for line in f)
-
-
-def build_sequence_neighborhoods(sequences):
-    """
-    Create dictionary mapping allowable mutated sequence to expected sequence.
-
-    Given a set of sequences, produce mutated sequences which can unambiguously
-    be mapped to expected sequences, within 2 substitutions. If a mutatation
-    maps to  multiple sequences, get rid of it. However, if a mutation maps to
-    an expected sequence with 1change and another with 2changes,
-    keep the 1change mapping.
-
-    Parameters
-    ----------
-        sequences : list, generator
-            List of sequences to generate neighborhoods for. 
-
-    Returns
-    -------
-        dict (str, str)
-            Dictionary where keys are mutated sequences and values corrected
-            sequences. 
-
-    References
-    ----------
-        Modified from original indrops repository: github.com/indrops/indrops
-    """
-
-    # contains all mutants that map uniquely to a barcode
-    clean_mapping = dict()
-
-    # contain single or double mutants 
-    mapping1 = defaultdict(set)
-    mapping2 = defaultdict(set)
-    
-    #Build the full neighborhood and iterate through barcodes
-    for seq in sequences:
-        # each barcode obviously maps to itself uniquely
-        clean_mapping[seq] = seq
-
-        # for each possible mutated form of a given barcode, either add
-        # the origin barcode into the set corresponding to that mutant or 
-        # create a new entry for a mutant not already in mapping1
-        # eg: barcodes CATG and CCTG would be in the set for mutant CTTG
-        # but only barcode CATG could generate mutant CANG
-        for n in seq_neighborhood(seq, 1):
-            mapping1[n].add(seq)
-        
-        # same as above but with double mutants
-        for n in seq_neighborhood(seq, 2):
-            mapping2[n].add(seq)   
-    
-    # take all single-mutants and find those that could only have come from one
-    # specific barcode
-    for k, v in mapping1.items():
-        if k not in clean_mapping:
-            if len(v) == 1:
-                clean_mapping[k] = list(v)[0]
-    
-    for k, v in mapping2.items():
-        if k not in clean_mapping:
-            if len(v) == 1:
-                clean_mapping[k] = list(v)[0]
-    del mapping1
-    del mapping2
-    return clean_mapping
-
-
-def get_library(seq, neighborhoods):
-    """
-    Return library name associated with given sequence.
-    
-    Parameters
-    ----------
-    seq : Bio.SeqRecord
-        Library index read from R3 fastq of an indrops V3 run.
-    neighborhoods : dict
-        Dictionary of neighboring sequences for each library index. Where each
-        key is a neighboring sequence, and each value is the expected library
-        index. 
-    
-    Returns
-    -------
-    str
-        Expected library index. If sequence is not present, returns "ambig".
-    """
-    try:
-        return neighborhoods[str(seq.seq)]
-    except KeyError:
-        return 'ambig'
-
-    
+# --------------------------------- File I/O -----------------------------------
 def open_library_fastqs(libraries, prefix=''):
     """Open all fastq IO objects."""
     io_dict = {}
@@ -216,9 +47,9 @@ def write_to_fastq(reads, fastqs):
     for library in fastqs.keys():
         SeqIO.write(reads[library]['cdna'], fastqs[library]['cdna'], 'fastq')
         SeqIO.write(reads[library]['bc_umi'], fastqs[library]['bc_umi'], 'fastq')
-    if library == 'ambig':
-            SeqIO.write(reads[library]['index'], fastqs[library]['index'],
-                        'fastq')
+        if library == 'ambig':
+                SeqIO.write(reads[library]['index'], fastqs[library]['index'],
+                            'fastq')
 
             
 def clear_reads(reads):
@@ -227,6 +58,77 @@ def clear_reads(reads):
         for key, value in reads[library].items():
             del value
             reads[library][key] = []
+
+
+def get_whitelist(barcode_file):
+    """Get sequences from barcode file."""
+    with open(barcode_file, 'r') as f:
+        return json.load(f)
+
+
+# ----------------------- Main Fastq Weaving Functions -------------------------
+def combine_reads(r2, r4, barcode_neighbors):
+    """
+    Combine R2 and R4 indrops v3 reads into barcode + UMI read.
+    
+    Parameters
+    ----------
+    r2 : Bio.SeqRecord
+        Read containing the first half of the gel barcode. Should be from the R2
+        fastq from an indrops V3 run.
+    r4 : Bio.SeqRecord
+        Read containing the second half of the gel barcode, the the UMI, and
+        part of the poly-A tail. Should be from the R4 fastq from an indrops
+        V3 run.
+    
+    Returns
+    -------
+    Bio.SeqRecord
+        Interleafed barcode + UMI read where the first 16 characters are the
+        cell barcode, and the next 6 are the UMI.
+    """
+    read_id = r2.id
+    desc = r2.description.split(' ')[0] + ' bc+umi'
+    seq = ''
+    quality = {'phred_quality': []}
+    for read in [r2, r4]:
+        seq += read.seq
+        quality['phred_quality'] += read.letter_annotations['phred_quality']
+    # replace observed barcode sequence with expected sequence from whitelist
+    try:
+        seq = barcode_neighbors[seq[:16]] + seq[16:]
+    except KeyError:
+        pass
+    # don't need poly A tail 
+    if len(seq) > 22:
+        seq = seq[:22]
+        quality['phred_quality'] = quality['phred_quality'][:22]
+    return SeqRecord.SeqRecord(seq=seq, id=read_id, name=read_id,
+                               description=desc, letter_annotations=quality)
+
+
+def get_library(seq, neighborhoods):
+    """
+    Return library name associated with given sequence.
+    
+    Parameters
+    ----------
+    seq : Bio.SeqRecord
+        Library index read from R3 fastq of an indrops V3 run.
+    neighborhoods : dict
+        Dictionary of neighboring sequences for each library index. Where each
+        key is a neighboring sequence, and each value is the expected library
+        index. 
+    
+    Returns
+    -------
+    str
+        Expected library index. If sequence is not present, returns "ambig".
+    """
+    try:
+        return neighborhoods[str(seq.seq)]
+    except KeyError:
+        return 'ambig'
 
             
 def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq, bc_file,
@@ -271,9 +173,9 @@ def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq, bc_file,
         reads.append(SeqIO.parse(handle, 'fastq'))
         fastq_handles.append(handle)
     # construct dictionary mapping allowable barcode mutationes to expected seqs
-    barcode_neighborhoods = build_sequence_neighborhoods(get_whitelist(bc_file))
+    barcode_neighborhoods = get_whitelist(bc_file)
     # construct dictionary mapping allowable library indices to library names
-    library_neighborhoods = build_sequence_neighborhoods(libraries.keys())
+    library_neighborhoods = seq_utils.build_sequence_neighborhoods(libraries.keys())
     # create extra key for unmatched library reads
     libraries['ambig'] = "ambig"
     # open library segregated fastq files
@@ -291,8 +193,8 @@ def parse_indrops_reads(r1_fastq, r2_fastq, r3_fastq, r4_fastq, bc_file,
         library_seq = get_library(r3, library_neighborhoods)
         library = libraries[library_seq]
         library_dict[library]['cdna'].append(r1)
-        library_dict[library]['bc_umi'].append(combine_reads(r2, r4),
-                                                          barcode_neighborhoods)
+        library_dict[library]['bc_umi'].append(combine_reads(r2, r4,
+                                                         barcode_neighborhoods))
         if library == 'ambig':
             library_dict[library]['index'].append(r3)
         records += 1

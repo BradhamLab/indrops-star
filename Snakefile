@@ -6,6 +6,7 @@ configfile: "files/2019-10-24_config.yaml"
 shell.prefix("source activate indrops-star; ")
 
 LIBRARIES = config['project']['libraries'].values()
+LIBRARIES = ['ASW-18hpf']
 SPLITS = ['L{}{}'.format('0'*(3 - len(str(n))), n)\
           for n in range(1, len(LIBRARIES) + 1)]
 READS = ['R1', 'R2', 'R3', 'R4']
@@ -59,6 +60,14 @@ rule unzip_fastqs:
     shell:
         "gunzip -c {input} > {output}"
 
+rule create_whitelist_neighborhood:
+    input:
+        whitelist='ref/gel_barcode3_list.txt'
+    output:
+        neighbors='ref/v3_whitelist_neighbors.json'
+    script:
+        'scripts/whitelist_neighbors.py'
+
 rule weave_fastqs:
     input:
         r1=os.path.join(config['project']['dir'],
@@ -73,7 +82,7 @@ rule weave_fastqs:
         r4=os.path.join(config['project']['dir'],
                       'Data', 'Intensities', 'BaseCalls',
                       'Undetermined_S0_{split}_R4_001.fastq.gz'),
-        whitelist="ref/gel_barcode3_list.txt"
+        whitelist='ref/v3_whitelist_neighbors.json'
     params:
         prefix= os.path.join(config['project']['dir'],
                              'processed', 'fastq', 'weaved',
@@ -86,7 +95,7 @@ rule weave_fastqs:
                library=LIBRARIES, allow_missing=True)),
         os.path.join(config['project']['dir'],
                                  'processed', 'fastq', 'weaved',
-                                 '{{split}}_' + 'ambig_library_idx.fastq'),
+                                 '{split}_' + 'ambig_library_idx.fastq'),
         temp(expand(os.path.join(config['project']['dir'],
                                  'processed', 'fastq', 'weaved',
                                  '{{split}}_' + '{library}_bc_umi.fastq'),
