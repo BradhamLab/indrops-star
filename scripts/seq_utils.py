@@ -2,6 +2,25 @@ from collections import defaultdict
 from itertools import combinations, product
 
 # ---------------------- Sequence Neighborhood Matching ------------------------
+def build_sequence_neighborhoods(sequences):
+    mapping = dict()
+    conflicts = set()
+    for seq in sequences:
+        # sequence maps to itself 
+        mapping[seq] = seq
+        for pos, mut in product(range(len(seq)), 'ATGCN'):
+            # if actualy mutation, add new sequence to mapping
+            if mut != seq[pos]:
+                new_seq = seq[:pos] + mut + seq[pos + 1:]
+                # check if unique mapping, otherwise remove and remember
+                if new_seq in mapping:
+                    conflicts.add(new_seq)
+                    mapping.pop(new_seq)
+                elif new_seq not in conflicts:
+                    mapping[new_seq] = seq
+    return mapping 
+
+# ---------------------- InDrops Neighborhood Matching -------------------------
 def seq_neighborhood(seq, n_subs=1):
     """
     Generate all n-substitution strings from sequence.
@@ -36,8 +55,7 @@ def seq_neighborhood(seq, n_subs=1):
                 seq_copy[p] = s
             yield ''.join(seq_copy)
 
-
-def build_sequence_neighborhoods(sequences):
+def indrops_build_sequence_neighborhoods(sequences):
     """
     Create dictionary mapping allowable mutated sequence to expected sequence.
 

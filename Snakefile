@@ -3,7 +3,7 @@ import os
 from scripts import utils
 
 configfile: "files/2019-10-24_config.yaml"
-shell.prefix("module load miniconda; source activate indrops-star; ")
+# shell.prefix("module load miniconda; source activate indrops-star; ")
 
 LIBRARIES = config['project']['libraries'].values()
 LIBRARIES = ['ASW-18hpf']
@@ -13,7 +13,7 @@ READS = ['R1', 'R2', 'R3', 'R4']
 
 rule all:
     input:
-        "ref/v3_whitelist_neighbors.json"
+        # "ref/v3_whitelist_neighbors.json"
         # mtx=expand(os.path.join(config['project']['dir'],
         #                         'processed', 'STAR', '{library}', 'Solo.out',
         #                         'Gene', 'raw', 'matrix.mtx'),
@@ -25,11 +25,10 @@ rule all:
         #                     'Data', 'Intensities', 'BaseCalls',
         #                     'Undetermined_S0_{split}_{r}_001.fastq.gz'),
         #        split=SPLITS, r=READS),
-        
-        # expand(os.path.join(config['project']['dir'],
-        #                          'processed', 'fastq', 'weaved',
-        #                          '{split}_' + f'{list(LIBRARIES)[0]}_cdna.fastq'),
-        #        split=SPLITS, allow_missing=True)
+        os.path.join(config['project']['dir'],
+                                 'processed', 'fastq', 'trimmed',
+                                 'L001_' + f'{list(LIBRARIES)[0]}_bc_umi.fastq')#,
+            #    split=SPLITS, allow_missing=True)
         # expand(os.path.join(config['project']['dir'],
         #                     'processed', 'STAR', '{library}',
         #                     'Solo.out/Gene/raw/matrix.mtx'),
@@ -87,7 +86,7 @@ rule weave_fastqs:
         r4=os.path.join(config['project']['dir'],
                       'Data', 'Intensities', 'BaseCalls',
                       'Undetermined_S0_{split}_R4_001.fastq.gz'),
-        whitelist='ref/v3_whitelist_neighbors.json'
+        whitelist='ref/gel_barcode3_list.txt'
     params:
         prefix= os.path.join(config['project']['dir'],
                              'processed', 'fastq', 'weaved',
@@ -117,56 +116,84 @@ rule trim_reads:
         cdna=os.path.join(config['project']['dir'], 
                         'processed', 'fastq', 'weaved',
                         '{split}_{library}_cdna.fastq'),
-        bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'weaved',
-                            '{split}_{library}_bc_umi.fastq')
     output:
         cdna=os.path.join(config['project']['dir'], 
                         'processed', 'fastq', 'trimmed',
                         '{split}_{library}_cdna.fastq'),
-        bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'trimmed',
-                            '{split}_{library}_bc_umi.fastq')
+    log:
+        os.path.join('logs', 'cutadapt', '{split}_{library}.log')
     params:
         cores=config['params']['cutadapt']['cores'],
         extra=' '.join(f"--{k}={v}" for k,v in \
                        config['params']['cutadapt']['extra'].items())
     shell:
-        "cutadapt --cores {params.cores} --minimum-length 1:22 "
-        "--output {output.cdna} --paired-output {output.bc_umi} "
-        "{params.extra} {input.cdna} {input.bc_umi}"
+        "(cutadapt --cores {params.cores} --minimum-length 1 "
+        "--output {output.cdna} {params.extra} {input.cdna}) 2> {log}"
 
-# set read 2 as umi to prevent filtering on umi bc_umi read -- I think
-# running bc we want complexity filtering 
-rule filter_reads:
-    input:
+# paired barcode + umi reads with filtered cdna reads 
+rule pair_reads:
+    input: 
         cdna=os.path.join(config['project']['dir'], 
                           'processed', 'fastq', 'trimmed',
                           '{split}_{library}_cdna.fastq'),
         bc_umi=os.path.join(config['project']['dir'],
+                            'processed', 'fastq','weaved',
+                            '{split}_{library}_bc_umi.fastq')
+    log:
+        os.path.join('logs', 'fastq_pair', '{split}_{library}.log')
+    output:
+        cdna_paired=temp(os.path.join(config['project']['dir'], 
+                                 'processed', 'fastq', 'trimmed',
+                                 '{split}_{library}_cdna.fastq.paired.fq')),
+        bc_umi_paired=temp(os.path.join(config['project']['dir'],
+                                   'processed', 'fastq','weaved',
+                                   '{split}_{library}_bc_umi.fastq.paired.fq')),
+        cdna_single=temp(os.path.join(config['project']['dir'], 
+                                 'processed', 'fastq', 'trimmed',
+                                 '{split}_{library}_cdna.fastq.single.fq')),
+        bc_umi_single=temp(os.path.join(config['project']['dir'],
+                                   'processed', 'fastq', 'weaved',
+                                   '{split}_{library}_bc_umi.fastq.single.fq')),
+        bc_keep=os.path.join(config['project']['dir'],
                             'processed', 'fastq', 'trimmed',
                             '{split}_{library}_bc_umi.fastq')
-    output:
-        cdna=os.path.join(config['project']['dir'], 
-                          'processed', 'fastq', 'filtered',
-                          '{split}_{library}_cdna.fastq'),
-        bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'filtered',
-                            '{split}_{library}_bc_umi.fastq')
-    params:
-        extra=' '.join(f'{k} {v}' for k,v in config['params']['fastp'].items())
     shell:
-        "fastp -i {input.cdna} -I {input.bc_umi} -U --umi_loc index2 "
-        "-o {output.cdna} -O {output.bc_umi} -g -x -y -l 1 -A"
+        "n_reads=$(awk 'NR % 4 == 2' {input.cdna} | wc -l); "
+        "fastq_pair -t $n_reads {input.cdna} {input.bc_umi}; "
+        "cp {output.bc_umi_paired} {output.bc_keep}"
+
+                        
+# set read 2 as umi to prevent filtering on umi bc_umi read -- I think
+# running bc we want complexity filtering 
+# rule filter_reads:
+#     input:
+#         cdna=os.path.join(config['project']['dir'], 
+#                           'processed', 'fastq', 'trimmed',
+#                           '{split}_{library}_cdna.fastq'),
+#         bc_umi=os.path.join(config['project']['dir'],
+#                             'processed', 'fastq', 'trimmed',
+#                             '{split}_{library}_bc_umi.fastq')
+#     output:
+#         cdna=os.path.join(config['project']['dir'], 
+#                           'processed', 'fastq', 'filtered',
+#                           '{split}_{library}_cdna.fastq'),
+#         bc_umi=os.path.join(config['project']['dir'],
+#                             'processed', 'fastq', 'filtered',
+#                             '{split}_{library}_bc_umi.fastq')
+#     params:
+#         extra=' '.join(f'{k} {v}' for k,v in config['params']['fastp'].items())
+#     shell:
+#         "fastp -i {input.cdna} -I {input.bc_umi} -U --umi_loc index2 "
+#         "-o {output.cdna} -O {output.bc_umi} -g -x -y -l 1 -A"
 
 rule combine_fastqs:
     input:
         cdna=expand(os.path.join(config['project']['dir'],
-                                 'processed', 'fastq', 'filtered',
+                                 'processed', 'fastq', 'trimmed',
                                  '{split}_{{library}}_cdna.fastq'),
                     split=SPLITS, allow_missing=True),
         bc_umi=expand(os.path.join(config['project']['dir'],
-                                   'processed', 'fastq', 'filtered',
+                                   'processed', 'fastq', 'trimmed',
                                    '{split}_{{library}}_bc_umi.fastq'),
                       split=SPLITS, allow_missing=True)
     output:

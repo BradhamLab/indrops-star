@@ -63,7 +63,7 @@ def clear_reads(reads):
 def get_whitelist(barcode_file):
     """Get sequences from barcode file."""
     with open(barcode_file, 'r') as f:
-        return json.load(f)
+        return seq_utils.build_sequence_neighborhoods((l.strip() for l in f))
 
 
 # ----------------------- Main Fastq Weaving Functions -------------------------
