@@ -3,20 +3,21 @@ import os
 from scripts import utils
 
 configfile: "files/2019-10-24_config.yaml"
-shell.prefix("source activate indrops-star; ")
+shell.prefix("module load miniconda; source activate indrops-star; ")
 
 LIBRARIES = config['project']['libraries'].values()
 LIBRARIES = ['ASW-18hpf']
-SPLITS = ['L{}{}'.format('0'*(3 - len(str(n))), n)\
-          for n in range(1, len(LIBRARIES) + 1)]
+SPLITS = [f'L00{n}' for n in range(1, 5)]
+# print(SPLITS)
 READS = ['R1', 'R2', 'R3', 'R4']
 
 rule all:
     input:
-        mtx=expand(os.path.join(config['project']['dir'],
-                                'processed', 'STAR', '{library}', 'Solo.out',
-                                'Gene', 'raw', 'matrix.mtx'),
-                   library=LIBRARIES),
+        "ref/v3_whitelist_neighbors.json"
+        # mtx=expand(os.path.join(config['project']['dir'],
+        #                         'processed', 'STAR', '{library}', 'Solo.out',
+        #                         'Gene', 'raw', 'matrix.mtx'),
+        #            library=LIBRARIES),
         # expand(os.path.join(config['project']['dir'], 'summaries',
         #              '{library}_reads_per_barcode.csv'),
         #        library=LIBRARIES)
@@ -68,6 +69,10 @@ rule create_whitelist_neighborhood:
     script:
         'scripts/whitelist_neighbors.py'
 
+# if we can quality/trim filter *before* weaving it will be faster/more
+# efficent. However, we'd have to combined index + bc + bc_umi to single read
+# and prevent trimming to ensure weaving afterward would be possible
+
 rule weave_fastqs:
     input:
         r1=os.path.join(config['project']['dir'],
@@ -89,28 +94,79 @@ rule weave_fastqs:
                              '{split}_'),
         libraries=config['project']['libraries']
     output:
-        temp(expand(os.path.join(config['project']['dir'],
+        expand(os.path.join(config['project']['dir'],
                                  'processed', 'fastq', 'weaved',
                                  '{{split}}_' + '{library}_cdna.fastq'),
-               library=LIBRARIES, allow_missing=True)),
+               library=LIBRARIES, allow_missing=True),
         os.path.join(config['project']['dir'],
                                  'processed', 'fastq', 'weaved',
                                  '{split}_' + 'ambig_library_idx.fastq'),
-        temp(expand(os.path.join(config['project']['dir'],
+        expand(os.path.join(config['project']['dir'],
                                  'processed', 'fastq', 'weaved',
                                  '{{split}}_' + '{library}_bc_umi.fastq'),
-               library=LIBRARIES, allow_missing=True))
+               library=LIBRARIES, allow_missing=True)
     script:
         "scripts/weave_fastqs.py"
+
+
+# trim reads using cutadapt -- seems necessary b/c fastp doesn't seem to quite
+# handle cdna, bc_umi structure for adapter trimming quite right
+# https://github.com/OpenGene/fastp/issues/103
+rule trim_reads:
+    input:
+        cdna=os.path.join(config['project']['dir'], 
+                        'processed', 'fastq', 'weaved',
+                        '{split}_{library}_cdna.fastq'),
+        bc_umi=os.path.join(config['project']['dir'],
+                            'processed', 'fastq', 'weaved',
+                            '{split}_{library}_bc_umi.fastq')
+    output:
+        cdna=os.path.join(config['project']['dir'], 
+                        'processed', 'fastq', 'trimmed',
+                        '{split}_{library}_cdna.fastq'),
+        bc_umi=os.path.join(config['project']['dir'],
+                            'processed', 'fastq', 'trimmed',
+                            '{split}_{library}_bc_umi.fastq')
+    params:
+        cores=config['params']['cutadapt']['cores'],
+        extra=' '.join(f"--{k}={v}" for k,v in \
+                       config['params']['cutadapt']['extra'].items())
+    shell:
+        "cutadapt --cores {params.cores} --minimum-length 1:22 "
+        "--output {output.cdna} --paired-output {output.bc_umi} "
+        "{params.extra} {input.cdna} {input.bc_umi}"
+
+# set read 2 as umi to prevent filtering on umi bc_umi read -- I think
+# running bc we want complexity filtering 
+rule filter_reads:
+    input:
+        cdna=os.path.join(config['project']['dir'], 
+                          'processed', 'fastq', 'trimmed',
+                          '{split}_{library}_cdna.fastq'),
+        bc_umi=os.path.join(config['project']['dir'],
+                            'processed', 'fastq', 'trimmed',
+                            '{split}_{library}_bc_umi.fastq')
+    output:
+        cdna=os.path.join(config['project']['dir'], 
+                          'processed', 'fastq', 'filtered',
+                          '{split}_{library}_cdna.fastq'),
+        bc_umi=os.path.join(config['project']['dir'],
+                            'processed', 'fastq', 'filtered',
+                            '{split}_{library}_bc_umi.fastq')
+    params:
+        extra=' '.join(f'{k} {v}' for k,v in config['params']['fastp'].items())
+    shell:
+        "fastp -i {input.cdna} -I {input.bc_umi} -U --umi_loc index2 "
+        "-o {output.cdna} -O {output.bc_umi} -g -x -y -l 1 -A"
 
 rule combine_fastqs:
     input:
         cdna=expand(os.path.join(config['project']['dir'],
-                                 'processed', 'fastq', 'weaved',
+                                 'processed', 'fastq', 'filtered',
                                  '{split}_{{library}}_cdna.fastq'),
                     split=SPLITS, allow_missing=True),
         bc_umi=expand(os.path.join(config['project']['dir'],
-                                   'processed', 'fastq', 'weaved',
+                                   'processed', 'fastq', 'filtered',
                                    '{split}_{{library}}_bc_umi.fastq'),
                       split=SPLITS, allow_missing=True)
     output:
@@ -123,7 +179,6 @@ rule combine_fastqs:
     shell:
         "cat {input.cdna} > {output.cdna}; "
         "cat {input.bc_umi} > {output.bc_umi};"
-
 
 rule count_reads_per_barcode:
     input:
@@ -207,56 +262,6 @@ rule plot_library_read_counts:
     script:
         "scripts/plot_library_read_counts.py"
 
-# trim reads using cutadapt -- seems necessary b/c fastp doesn't seem to quite
-# handle cdna, bc_umi structure for adapter trimming quite right
-# https://github.com/OpenGene/fastp/issues/103
-rule trim_reads:
-    input:
-        cdna=os.path.join(config['project']['dir'], 
-                        'processed', 'fastq', 'combined',
-                        '{library}_cdna.fastq'),
-        bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'combined',
-                            '{library}_bc_umi.fastq')
-    output:
-        cdna=os.path.join(config['project']['dir'], 
-                        'processed', 'fastq', 'trimmed',
-                        '{library}_cdna.fastq'),
-        bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'trimmed',
-                            '{library}_bc_umi.fastq')
-    params:
-        cores=config['params']['cutadapt']['cores'],
-        extra=' '.join(f"--{k}={v}" for k,v in \
-                       config['params']['cutadapt']['extra'].items())
-    shell:
-        "cutadapt --cores {params.cores} --minimum-length 1:22 "
-        "--output {output.cdna} --paired-output {input.bc_umi} "
-        "{params.extra} {input.cdna} {input.bc_umi}"
-
-# set read 2 as umi to prevent filtering on umi bc_umi read -- I think
-# running bc we want complexity filtering 
-rule filter_reads:
-    input:
-        cdna=os.path.join(config['project']['dir'], 
-                          'processed', 'fastq', 'trimmed',
-                          '{library}_cdna.fastq'),
-        bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'trimmed',
-                            '{library}_bc_umi.fastq')
-    output:
-        cdna=os.path.join(config['project']['dir'], 
-                          'processed', 'fastq', 'filtered',
-                          '{library}_cdna.fastq'),
-        bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'filtered',
-                            '{library}_bc_umi.fastq')
-    params:
-        extra=' '.join(f'{k} {v}' for k,v in config['params']['fastp'].items())
-    shell:
-        "fastp -i {input.cdna} -I {input.bc_umi} -U --umi_loc index2 "
-        "-o {output.cdna} -O {output.bc_umi} -g -x -y -l 1 -A"
-
 
 rule build_star_index:
     input:
@@ -279,10 +284,10 @@ rule run_star_solo:
     input:
         index=os.path.join(config['STAR']['index'], 'Genome'),
         cdna=os.path.join(config['project']['dir'], 
-                          'processed', 'fastq', 'filtered',
+                          'processed', 'fastq', 'combined',
                           '{library}_cdna.fastq'),
         bc_umi=os.path.join(config['project']['dir'],
-                            'processed', 'fastq', 'filtered',
+                            'processed', 'fastq', 'combined',
                             '{library}_bc_umi.fastq'),
         whitelist="ref/gel_barcode3_list.txt"
     params:
