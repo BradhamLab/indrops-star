@@ -2,7 +2,7 @@ import itertools
 import os
 from scripts import utils
 
-configfile: "files/2019-10-24_config.yaml"
+configfile: "files/2021-03-04_config.yaml"
 # shell.prefix("module load miniconda; source activate indrops-star; ")
 
 LIBRARIES = config['project']['libraries'].values()
@@ -83,7 +83,7 @@ rule interleaf_r3r2r4:
                       'Undetermined_S0_{lane}_R4_001.fastq.gz'),
     output:
         temp(os.path.join(config['project']['dir'], 'processed', 'fastq', 'interleafed',
-                     '{lane}_lib_bc_umi.fastq')) # TODO this should become temporary file
+                     '{lane}_lib_bc_umi.fastq'))
 
     shell:
         "paste <(zcat {input.r3}) <(zcat {input.r2}) <(zcat {input.r4}) | "
@@ -97,9 +97,9 @@ rule trim_reads:
         cdna=os.path.join(config['project']['dir'],
                         'tmp', '{lane}_R1_001.fastq')
     output:
-        cdna=os.path.join(config['project']['dir'], 
+        cdna=temp(os.path.join(config['project']['dir'], 
                                'processed', 'fastq', 'trimmed',
-                               '{lane}_cdna.fastq'),
+                               '{lane}_cdna.fastq')),
     log:
         os.path.join('logs', 'cutadapt', '{lane}.log')
     params:
@@ -126,18 +126,18 @@ rule pair_reads:
                            'processed', 'fastq', 'interleafed',
                            '{lane}_lib_bc_umi.fastq.paired.fq')),
     output:
-        cdna_paired=os.path.join(config['project']['dir'], 
+        cdna_paired=temp(os.path.join(config['project']['dir'], 
                                       'processed', 'fastq', 'trimmed',
-                                      '{lane}_cdna.fastq.paired.fq'),
-        cdna_single=os.path.join(config['project']['dir'], 
+                                      '{lane}_cdna.fastq.paired.fq')),
+        cdna_single=temp(os.path.join(config['project']['dir'], 
                                       'processed', 'fastq', 'trimmed',
-                                      '{lane}_cdna.fastq.single.fq'),
-        bc_umi_single=os.path.join(config['project']['dir'],
+                                      '{lane}_cdna.fastq.single.fq')),
+        bc_umi_single=temp(os.path.join(config['project']['dir'],
                                         'processed', 'fastq', 'interleafed',
-                                        '{lane}_lib_bc_umi.fastq.single.fq'),
-        bc_keep=os.path.join(config['project']['dir'],
+                                        '{lane}_lib_bc_umi.fastq.single.fq')),
+        bc_keep=temp(os.path.join(config['project']['dir'],
                              'processed', 'fastq', 'trimmed',
-                             '{lane}_lib_bc_umi.fastq')
+                             '{lane}_lib_bc_umi.fastq'))
     shell:
         "n_reads=$(awk 'NR % 4 == 2' {input.cdna} | wc -l); "
         "(fastq_pair -t $n_reads {input.cdna} {input.bc_umi}) 2> {log}; "
@@ -162,13 +162,13 @@ rule cutadapt_demultiplex:
         cdna_prefix=lambda wc: os.path.join(demult_dir,
                                             f"{wc.lane}" +  "_{name}_cdna.fastq"), 
     output:
-        bc=[os.path.join(demult_dir, '{lane}' + \
-                              '_{}_bc_umi.fastq'.format(x)) \
+        bc=[temp(os.path.join(demult_dir, '{lane}' + \
+                              '_{}_bc_umi.fastq'.format(x))) \
                               for x in LIBRARIES],
-        cdna=[os.path.join(demult_dir, '{lane}' + \ 
-                                '_{}_cdna.fastq'.format(x)) \
+        cdna=[temp(os.path.join(demult_dir, '{lane}' + \ 
+                                '_{}_cdna.fastq'.format(x))) \
                                 for x in LIBRARIES],
-        missed=os.path.join(demult_dir, '{lane}_unknown_cdna.fastq')
+        missed=temp(os.path.join(demult_dir, '{lane}_unknown_cdna.fastq'))
     shell:
         "cutadapt --cores {params.cores} -e {params.error} --no-indels {params.barcodes} "
         "-o {params.bc_prefix} -p {params.cdna_prefix} "
