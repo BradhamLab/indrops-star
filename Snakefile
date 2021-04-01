@@ -17,32 +17,12 @@ rule all:
                                 'processed', 'STAR', '{library}', 'Solo.out',
                                 'Gene', 'raw', 'matrix.mtx'),
                    library=LIBRARIES),
-        expand(os.path.join(config['project']['dir'], 
-                            'processed', 'fastq', 'demultiplexed',
-                            '{lane}_{library}_bc_umi.fastq'),
-               lane=LANES, library=LIBRARIES),
         expand(os.path.join(config['project']['dir'], 'summaries', 'plots', 
                             '{library}_read_per_barcode_cdf.png'),
                library=LIBRARIES),
         os.path.join(config['project']['dir'],
                          'summaries', 'plots', 'read_counts.png')
-        # expand(os.path.join(config['project']['dir'], 'processed', 'reads',
-        #                     '{library}_reads_per_barcode.csv'),
-        #        library=LIBRARIES)
-        # os.path.join(config['project']['dir'],
-        #                     'processed', 'fastq', 'trimmed',
-        #                     'L001_lib_bc_umi.fastq'),
-        # expand(os.path.join(config['project']['dir'], 
-        #                   'processed', 'fastq', 'combined',
-        #                   '{library}_cdna.fastq'),
-        #        library=LIBRARIES)
-            #    lane=LANES, allow_missing=True)
-        # expand(os.path.join(config['project']['dir'],
-        #                     'processed', 'STAR', '{library}',
-        #                     'Solo.out/Gene/raw/matrix.mtx'),
-        #        library=LIBRARIES),
-        # os.path.join(config['project']['dir'],
-        #              'summaries', 'reads', 'read_counts.png'),
+
 rule extract_fastqs:
     output:
         expand(os.path.join(config['project']['dir'],
@@ -168,7 +148,7 @@ rule cutadapt_demultiplex:
         cdna=[temp(os.path.join(demult_dir, '{lane}' + \ 
                                 '_{}_cdna.fastq'.format(x))) \
                                 for x in LIBRARIES],
-        missed=temp(os.path.join(demult_dir, '{lane}_unknown_cdna.fastq'))
+        missed=os.path.join(demult_dir, '{lane}_unknown_cdna.fastq')
     shell:
         "cutadapt --cores {params.cores} -e {params.error} --no-indels {params.barcodes} "
         "-o {params.bc_prefix} -p {params.cdna_prefix} "
