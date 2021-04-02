@@ -2,7 +2,7 @@ import itertools
 import os
 from scripts import utils
 
-configfile: "files/2021-03-04_config.yaml"
+configfile: "files/2021-03-09_config.yaml"
 # shell.prefix("module load miniconda; source activate indrops-star; ")
 
 LIBRARIES = config['project']['libraries'].values()
@@ -277,7 +277,8 @@ rule run_star_solo:
         bc_umi=os.path.join(config['project']['dir'],
                             'processed', 'fastq', 'combined',
                             '{library}_bc_umi.fastq'),
-        whitelist="ref/gel_barcode3_list.txt"
+        whitelist="ref/gel_barcode3_list.txt",
+        config='files/2019-10-24_config.yaml'
     params:
         index=config['STAR']['index'],
         out=os.path.join(config['project']['dir'], 'processed', 'STAR', '{library}') + '/',
