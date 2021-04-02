@@ -1,0 +1,9 @@
+clipAdapterType: "CellRanger4"
+outFilterScoreMin: 30
+soloCBmatchWLtype: "1MM_multi_Nbase_pseudocounts" 
+soloUMIfiltering: "MultiGeneUMI_CR"
+soloUMIdedup: "1MM_CR"
+soloCellFilter: "EmptyDrops_CR"
+outFilterScoreMinOverLread: 0.3
+outFilterMatchNminOverLread: 0.3
+runThreadN: 8
