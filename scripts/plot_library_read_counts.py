@@ -17,6 +17,7 @@ if __name__ == "__main__":
         read_counts["Log10(Read Counts)"] = np.log10(read_counts['Read.Counts'])
         plt.subplots(figsize=(13, 8))
         sns.barplot(x='Library', y='Log10(Read Counts)', data=read_counts)
+        plt.xticks(rotation=90)
         plt.tight_layout()
         plt.savefig(snakemake.output['img'])
         plt.close()
