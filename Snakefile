@@ -6,7 +6,7 @@ import yaml
 from scripts import utils
 
 
-configfile: "files/2019-10-24_config.yaml"
+configfile: "files/2021-03-10_config.yaml"
 
 
 # load in parameter configurations for STAR, STARSolo, demultiplexing, and trimming
@@ -14,15 +14,12 @@ parameters = {}
 for step, each in config["params"].items():
     with open(each, "r") as f:
         parameters[step] = yaml.load(f, yaml.SafeLoader)
-# shell.prefix("module load miniconda; source activate indrops-star; ")
 
 LIBRARIES = config["project"]["libraries"].values()
 LANES = [f"L00{n}" for n in range(1, 5)]
-# print(LANES)
 READS = ["R1", "R2", "R3", "R4"]
 
 
-# TODO -- use temporary files again -- make sure pipeline can run to completion first
 rule all:
     input:
         expand(
@@ -466,6 +463,15 @@ rule run_star_solo:
         ),
         solo=" ".join(f"--{k} {v}" for k, v in parameters["star_solo"].items()),
     output:
+        sam=temp(
+            os.path.join(
+                config["project"]["dir"],
+                "processed",
+                "STAR",
+                "{library}",
+                "Aligned.out.sam"
+            )
+        ),
         mtx=os.path.join(
             config["project"]["dir"],
             "processed",
@@ -497,11 +503,11 @@ rule run_star_solo:
             "features.tsv",
         ),
     log:
-        "logs/{library}_starsolo.log",
+        "logs/star_solo/{library}.log",
     shell:
         "(STAR --genomeDir {params.index} "
         "--readFilesIn {input.cdna} {input.bc_umi} --soloType CB_UMI_Simple "
-        "--soloCBwhitelist {input.whitelist} --soloFeatures Gene SJ GeneFull Velocyto"
+        "--soloCBwhitelist {input.whitelist} --soloFeatures Gene SJ GeneFull Velocyto "
         "--soloStrand Unstranded [Reverse/Forward] --outFileNamePrefix {params.out} "
         "--soloCBstart 1 --soloCBlen 16 --soloUMIstart 17 --soloUMIlen 6 "
         "{params.solo}) 2> {log}"
