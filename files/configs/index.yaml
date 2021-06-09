@@ -1,2 +1,3 @@
 sjdbOverhang: 60
 genomeSAindexNbases: 13
+runThreadN: 8

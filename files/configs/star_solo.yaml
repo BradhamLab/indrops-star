@@ -5,3 +5,4 @@ soloUMIdedup: "1MM_CR"
 outFilterScoreMinOverLread: 0.3
 outFilterMatchNminOverLread: 0.3
 runThreadN: 8
+soloMultiMappers: "EM"
